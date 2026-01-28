@@ -50,19 +50,23 @@ This approach improves accuracy, reduces hallucinations, and mirrors real produc
 ## 🛠️ Tech Stack
 
 ### Frontend
+
 - Next.js (App Router)
 - Tailwind CSS
 - shadcn/ui
 
 ### Backend
+
 - Next.js Server Actions / API Routes
 - Resume parsing utilities (PDF & DOCX)
 
 ### AI
+
 - OpenAI API (structured JSON outputs)
 - Prompt chaining with strict constraints
 
 ### Auth & Data (Optional)
+
 - Clerk (authentication)
 - Convex or Supabase (storage & versioning)
 
@@ -171,4 +175,3 @@ MIT License
 ## 🙌 Acknowledgements
 
 Built as a portfolio project to demonstrate applied AI, frontend engineering, and thoughtful product design.
-

@@ -1,0 +1,23 @@
+
+> ai_resume_tailor@0.1.0 dev
+> next dev
+
+▲ Next.js 16.1.5 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.0.106:3000
+- Environments: .env.local
+
+✓ Starting...
+✓ Ready in 1212ms
+○ Compiling / ...
+ GET / 200 in 7.3s (compile: 6.8s, proxy.ts: 308ms, render: 282ms)
+ POST /api/save-resume 200 in 1260ms (compile: 717ms, proxy.ts: 13ms, render: 530ms)
+ POST /api/save-job 200 in 356ms (compile: 223ms, proxy.ts: 11ms, render: 123ms)
+ POST /api/tailor 501 in 1573ms (compile: 1564ms, proxy.ts: 4ms, render: 4ms)
+ POST /api/save-resume 200 in 285ms (compile: 7ms, proxy.ts: 8ms, render: 270ms)
+ POST /api/save-job 200 in 132ms (compile: 6ms, proxy.ts: 7ms, render: 119ms)
+ POST /api/tailor 501 in 14ms (compile: 7ms, proxy.ts: 4ms, render: 4ms)
+ POST /api/save-resume 200 in 325ms (compile: 4ms, proxy.ts: 6ms, render: 315ms)
+ POST /api/save-resume 200 in 347ms (compile: 6ms, proxy.ts: 9ms, render: 333ms)
+ POST /api/save-job 200 in 136ms (compile: 5ms, proxy.ts: 5ms, render: 127ms)
+ POST /api/tailor 501 in 14ms (compile: 4ms, proxy.ts: 5ms, render: 5ms)

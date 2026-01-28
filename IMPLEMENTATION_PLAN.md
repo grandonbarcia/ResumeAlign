@@ -10,10 +10,10 @@ This document outlines the implementation roadmap for the ResumeAlign applicatio
 
 | Task | Description                                                                                   | Status |
 | ---- | --------------------------------------------------------------------------------------------- | ------ |
-| 1.1  | Install dependencies: `shadcn/ui`, `openai`, `pdf-parse`, `mammoth` (DOCX), `clerk`, `convex` | ⬜     |
-| 1.2  | Set up Clerk authentication                                                                   | ⬜     |
-| 1.3  | Configure Convex schema for resumes, jobs, and tailored results                               | ⬜     |
-| 1.4  | Create folder structure: `/lib`, `/prompts`, `/app/dashboard`, `/app/upload`, `/app/results`  | ⬜     |
+| 1.1  | Install dependencies: `shadcn/ui`, `openai`, `pdf-parse`, `mammoth` (DOCX), `clerk`, `convex` | ✅     |
+| 1.2  | Set up Clerk authentication                                                                   | ✅     |
+| 1.3  | Configure Convex schema for resumes, jobs, and tailored results                               | ✅     |
+| 1.4  | Create folder structure: `/lib`, `/prompts`, `/app/dashboard`, `/app/upload`, `/app/results`  | ✅     |
 
 ---
 
@@ -21,10 +21,10 @@ This document outlines the implementation roadmap for the ResumeAlign applicatio
 
 | Task | Description                                                                      | Status |
 | ---- | -------------------------------------------------------------------------------- | ------ |
-| 2.1  | Build upload UI with drag-and-drop (PDF, DOCX, TXT)                              | ⬜     |
-| 2.2  | Create `resumeParser.ts` — extract text from PDF/DOCX                            | ⬜     |
-| 2.3  | AI-powered resume structuring into JSON (contact, experience, education, skills) | ⬜     |
-| 2.4  | Store parsed resume in Convex                                                    | ⬜     |
+| 2.1  | Build upload UI with drag-and-drop (PDF, DOCX, TXT)                              | ✅     |
+| 2.2  | Create `resumeParser.ts` — extract text from PDF/DOCX                            | ✅     |
+| 2.3  | AI-powered resume structuring into JSON (contact, experience, education, skills) | ✅     |
+| 2.4  | Store parsed resume in Convex                                                    | ✅     |
 
 ---
 
@@ -32,10 +32,10 @@ This document outlines the implementation roadmap for the ResumeAlign applicatio
 
 | Task | Description                                                           | Status |
 | ---- | --------------------------------------------------------------------- | ------ |
-| 3.1  | Build job URL input component                                         | ⬜     |
-| 3.2  | Create `jobExtractor.ts` — fetch and extract job description from URL | ⬜     |
-| 3.3  | AI-powered job structuring (requirements, responsibilities, keywords) | ⬜     |
-| 3.4  | Store structured job data in Convex                                   | ⬜     |
+| 3.1  | Build job URL input component                                         | ✅     |
+| 3.2  | Create `jobExtractor.ts` — fetch and extract job description from URL | ✅     |
+| 3.3  | AI-powered job structuring (requirements, responsibilities, keywords) | ✅     |
+| 3.4  | Store structured job data in Convex                                   | ✅     |
 
 ---
 
@@ -43,12 +43,12 @@ This document outlines the implementation roadmap for the ResumeAlign applicatio
 
 | Task | Description                                                               | Status |
 | ---- | ------------------------------------------------------------------------- | ------ |
-| 4.1  | **Step 1**: Job Description Structuring prompt (`structureJob.ts`)        | ⬜     |
-| 4.2  | **Step 2**: Resume vs Job Gap Analysis prompt (`gapAnalysis.ts`)          | ⬜     |
-| 4.3  | **Step 3**: Bullet-Level Resume Rewriting prompt (`bulletRewrite.ts`)     | ⬜     |
-| 4.4  | **Step 4**: Skills Optimization & Reordering prompt (`skillsOptimize.ts`) | ⬜     |
-| 4.5  | **Step 5**: Final Resume Assembly                                         | ⬜     |
-| 4.6  | Create `aiPipeline.ts` to orchestrate all steps                           | ⬜     |
+| 4.1  | **Step 1**: Job Description Structuring prompt (`structureJob.ts`)        | ✅     |
+| 4.2  | **Step 2**: Resume vs Job Gap Analysis prompt (`gapAnalysis.ts`)          | ✅     |
+| 4.3  | **Step 3**: Bullet-Level Resume Rewriting prompt (`bulletRewrite.ts`)     | ✅     |
+| 4.4  | **Step 4**: Skills Optimization & Reordering prompt (`skillsOptimize.ts`) | ✅     |
+| 4.5  | **Step 5**: Final Resume Assembly                                         | ✅     |
+| 4.6  | Create `aiPipeline.ts` to orchestrate all steps                           | ✅     |
 
 ---
 
@@ -56,10 +56,10 @@ This document outlines the implementation roadmap for the ResumeAlign applicatio
 
 | Task | Description                                     | Status |
 | ---- | ----------------------------------------------- | ------ |
-| 5.1  | Build results page with tailored resume display | ⬜     |
-| 5.2  | Create diff view component (before vs after)    | ⬜     |
-| 5.3  | Show change explanations per bullet point       | ⬜     |
-| 5.4  | Display skills changes with reasoning           | ⬜     |
+| 5.1  | Build results page with tailored resume display | ✅     |
+| 5.2  | Create diff view component (before vs after)    | ✅     |
+| 5.3  | Show change explanations per bullet point       | ✅     |
+| 5.4  | Display skills changes with reasoning           | ✅     |
 
 ---
 
@@ -67,9 +67,9 @@ This document outlines the implementation roadmap for the ResumeAlign applicatio
 
 | Task | Description                                      | Status |
 | ---- | ------------------------------------------------ | ------ |
-| 6.1  | PDF export with ATS-friendly formatting          | ⬜     |
-| 6.2  | DOCX export using `docx` library                 | ⬜     |
-| 6.3  | Ensure no tables, columns, or graphics in output | ⬜     |
+| 6.1  | PDF export with ATS-friendly formatting          | ✅     |
+| 6.2  | DOCX export using `docx` library                 | ✅     |
+| 6.3  | Ensure no tables, columns, or graphics in output | ✅     |
 
 ---
 
@@ -77,10 +77,10 @@ This document outlines the implementation roadmap for the ResumeAlign applicatio
 
 | Task | Description                                        | Status |
 | ---- | -------------------------------------------------- | ------ |
-| 7.1  | Add hallucination prevention guardrails in prompts | ⬜     |
-| 7.2  | Validate AI outputs against original resume        | ⬜     |
-| 7.3  | Add loading states and error handling              | ⬜     |
-| 7.4  | Mobile responsive design                           | ⬜     |
+| 7.1  | Add hallucination prevention guardrails in prompts | ✅     |
+| 7.2  | Validate AI outputs against original resume        | ✅     |
+| 7.3  | Add loading states and error handling              | ✅     |
+| 7.4  | Mobile responsive design                           | ✅     |
 
 ---
 
@@ -152,9 +152,14 @@ The AI prompts must enforce:
 
 ## 📝 Progress Log
 
-| Date | Task Completed | Notes |
-| ---- | -------------- | ----- |
-| —    | —              | —     |
+| Date       | Task Completed                                          | Notes                                                               |
+| ---------- | ------------------------------------------------------- | ------------------------------------------------------------------- |
+| 2026-01-28 | Phase 4 pipeline + /api/tailor + results page (initial) | Added prompts, orchestration, Convex tailoringRuns, and results UI. |
+| 2026-01-28 | Phase 5 skills diff + rationale                         | Show original vs optimized skills, movement, and reasoning.         |
+| 2026-01-28 | Phase 6 export (PDF + DOCX)                             | Added server export routes and results page download buttons.       |
+| 2026-01-28 | Mock AI fallback mode                                   | App runs without `OPENAI_API_KEY` via heuristic mock provider.      |
+| 2026-01-28 | Safety validations & guardrails                         | Enforced no-invention rules (skills subset, bullet rewrite checks). |
+| 2026-01-28 | UI polish (Phase 7.3/7.4 started)                       | Standardized alerts + improved small-screen layouts and wrapping.   |
 
 ---
 
