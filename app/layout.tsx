@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { ClerkProvider } from '@clerk/nextjs';
 import { Geist, Geist_Mono } from 'next/font/google';
 import { ToastProvider } from '@/components/ToastProvider';
+import { Navbar } from '@/components/Navbar';
 import './globals.css';
 
 const geistSans = Geist({
@@ -30,9 +31,14 @@ export default function RootLayout({
   const content = (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen flex flex-col`}
       >
-        <ToastProvider>{children}</ToastProvider>
+        <ToastProvider>
+          <Navbar />
+          <main className="flex-1 text-foreground bg-background">
+            {children}
+          </main>
+        </ToastProvider>
       </body>
     </html>
   );
