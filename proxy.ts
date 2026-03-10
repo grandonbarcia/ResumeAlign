@@ -1,12 +1,38 @@
-import { clerkMiddleware } from '@clerk/nextjs/server';
+import {
+  convexAuthNextjsMiddleware,
+  createRouteMatcher,
+  nextjsMiddlewareRedirect,
+} from '@convex-dev/auth/nextjs/server';
 import { NextResponse } from 'next/server';
 
-const hasClerkKeys = Boolean(
-  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY,
-);
+const hasConvexUrl = Boolean(process.env.NEXT_PUBLIC_CONVEX_URL);
 
-export const proxy = hasClerkKeys
-  ? clerkMiddleware()
+const isAuthPage = createRouteMatcher(['/sign-in(.*)', '/sign-up(.*)']);
+const isProtectedPage = createRouteMatcher([
+  '/dashboard(.*)',
+  '/results(.*)',
+  '/upload(.*)',
+]);
+const isProtectedApiRoute = createRouteMatcher([
+  '/api/save-job',
+  '/api/save-resume',
+  '/api/tailor',
+  '/api/export(.*)',
+]);
+
+export const proxy = hasConvexUrl
+  ? convexAuthNextjsMiddleware(async (request, { convexAuth }) => {
+      if (isAuthPage(request) && (await convexAuth.isAuthenticated())) {
+        return nextjsMiddlewareRedirect(request, '/dashboard');
+      }
+
+      if (
+        (isProtectedPage(request) || isProtectedApiRoute(request)) &&
+        !(await convexAuth.isAuthenticated())
+      ) {
+        return nextjsMiddlewareRedirect(request, '/sign-in');
+      }
+    })
   : () => NextResponse.next();
 
 export const config = {

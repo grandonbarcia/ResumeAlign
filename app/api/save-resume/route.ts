@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
-import { ConvexHttpClient } from 'convex/browser';
 import { api } from '@/convex/_generated/api';
+import {
+  AuthenticationRequiredError,
+  MissingConvexUrlError,
+  createAuthenticatedServerConvexClient,
+} from '@/lib/convexServerClient';
 
 export const runtime = 'nodejs';
 
@@ -10,30 +14,7 @@ type Body = {
   parsed?: unknown;
 };
 
-const hasClerkKeys = Boolean(
-  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY,
-);
-
-async function getUserId(): Promise<string> {
-  if (!hasClerkKeys) return 'anonymous';
-
-  const mod = await import('@clerk/nextjs/server');
-  const { userId } = await mod.auth();
-  return userId ?? 'anonymous';
-}
-
 export async function POST(request: Request) {
-  const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
-  if (!convexUrl) {
-    return NextResponse.json(
-      {
-        error:
-          'NEXT_PUBLIC_CONVEX_URL is not set. Run `npx convex dev` and set it in .env.local to enable saving.',
-      },
-      { status: 501 },
-    );
-  }
-
   let body: Body;
   try {
     body = (await request.json()) as Body;
@@ -49,11 +30,9 @@ export async function POST(request: Request) {
   }
 
   try {
-    const userId = await getUserId();
-    const client = new ConvexHttpClient(convexUrl);
+    const client = await createAuthenticatedServerConvexClient();
 
     const id = await client.mutation(api.resumes.create, {
-      userId,
       filename: body.filename,
       originalText: body.originalText,
       parsed: body.parsed,
@@ -61,6 +40,14 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ id });
   } catch (error) {
+    if (error instanceof MissingConvexUrlError) {
+      return NextResponse.json({ error: error.message }, { status: 501 });
+    }
+
+    if (error instanceof AuthenticationRequiredError) {
+      return NextResponse.json({ error: error.message }, { status: 401 });
+    }
+
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

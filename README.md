@@ -67,8 +67,8 @@ This approach improves accuracy, reduces hallucinations, and mirrors real produc
 
 ### Auth & Data (Optional)
 
-- Clerk (authentication)
-- Convex or Supabase (storage & versioning)
+- Convex Auth with Google/GitHub OAuth
+- Convex (storage & versioning)
 
 ---
 

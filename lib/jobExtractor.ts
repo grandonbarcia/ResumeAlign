@@ -3,6 +3,15 @@ import { htmlToText } from 'html-to-text';
 
 const MAX_HTML_BYTES = 1_500_000; // ~1.5MB
 const FETCH_TIMEOUT_MS = 15_000;
+const MIN_EXTRACTED_CHARS = 300;
+
+const DEFAULT_HEADERS: Record<string, string> = {
+  // A realistic UA helps avoid simplistic bot-blocks.
+  'user-agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'accept-language': 'en-US,en;q=0.9',
+};
 
 function normalizeText(text: string) {
   return text
@@ -11,6 +20,18 @@ function normalizeText(text: string) {
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+function looksLikeJavascriptGated(text: string) {
+  const t = text.toLowerCase();
+  return (
+    t.includes('enable javascript') ||
+    t.includes('requires javascript') ||
+    t.includes('please turn javascript on') ||
+    t.includes('you need to enable javascript') ||
+    t.includes('checking your browser') ||
+    t.includes('cloudflare')
+  );
 }
 
 function isIpV4(host: string) {
@@ -83,6 +104,37 @@ async function readTextWithLimit(response: Response, maxBytes: number) {
   return buffer.toString('utf8');
 }
 
+async function fetchWithTimeout(url: string, init: RequestInit) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function extractJobTextFromJina(bodyText: string) {
+  const normalized = normalizeText(bodyText);
+
+  // Jina reader commonly returns a short header + "Markdown Content:" section.
+  let title = '';
+  const titleMatch = normalized.match(/\btitle:\s*(.+)$/im);
+  if (titleMatch?.[1]) title = normalizeText(titleMatch[1]);
+
+  let text = normalized;
+  const mdIdx = normalized.toLowerCase().indexOf('markdown content:');
+  if (mdIdx !== -1) {
+    text = normalizeText(normalized.slice(mdIdx + 'markdown content:'.length));
+  }
+
+  return { title, text };
+}
+
 export function extractJobTextFromHtml(html: string) {
   const $ = load(html);
   $('script,noscript,style,svg,canvas,iframe').remove();
@@ -107,51 +159,67 @@ export function extractJobTextFromHtml(html: string) {
 export async function extractJobTextFromUrl(rawUrl: string) {
   const url = assertSafeJobUrl(rawUrl);
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  // Attempt 1: direct HTML fetch.
+  const res = await fetchWithTimeout(url.toString(), {
+    method: 'GET',
+    redirect: 'follow',
+    headers: DEFAULT_HEADERS,
+  });
 
-  try {
-    const res = await fetch(url.toString(), {
+  if (!res.ok) {
+    throw new Error(`Failed to fetch (${res.status})`);
+  }
+
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.toLowerCase().includes('text/html')) {
+    throw new Error('URL did not return HTML content');
+  }
+
+  const contentLength = res.headers.get('content-length');
+  if (contentLength && Number(contentLength) > MAX_HTML_BYTES) {
+    throw new Error('Response too large');
+  }
+
+  const html = await readTextWithLimit(res, MAX_HTML_BYTES);
+  let { title, text } = extractJobTextFromHtml(html);
+
+  const directLooksBad =
+    !text ||
+    text.length < MIN_EXTRACTED_CHARS ||
+    looksLikeJavascriptGated(text);
+
+  // Attempt 2: fallback to reader proxy for JS-rendered / heavily scripted pages.
+  if (directLooksBad) {
+    const jinaUrl = `https://r.jina.ai/${url.toString()}`;
+    const readerRes = await fetchWithTimeout(jinaUrl, {
       method: 'GET',
       redirect: 'follow',
-      signal: controller.signal,
       headers: {
-        'user-agent':
-          'ResumeAlignBot/1.0 (+https://example.invalid) Mozilla/5.0', // polite UA
-        accept:
-          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        ...DEFAULT_HEADERS,
+        accept: 'text/plain, text/markdown;q=0.9, */*;q=0.8',
       },
     });
 
-    if (!res.ok) {
-      throw new Error(`Failed to fetch (${res.status})`);
+    if (readerRes.ok) {
+      const readerText = await readTextWithLimit(readerRes, MAX_HTML_BYTES);
+      const readerExtracted = extractJobTextFromJina(readerText);
+
+      if (readerExtracted.text && readerExtracted.text.length > text.length) {
+        text = readerExtracted.text;
+        if (!title) title = readerExtracted.title;
+      }
     }
-
-    const contentType = res.headers.get('content-type') || '';
-    if (!contentType.toLowerCase().includes('text/html')) {
-      throw new Error('URL did not return HTML content');
-    }
-
-    const contentLength = res.headers.get('content-length');
-    if (contentLength && Number(contentLength) > MAX_HTML_BYTES) {
-      throw new Error('Response too large');
-    }
-
-    const html = await readTextWithLimit(res, MAX_HTML_BYTES);
-    const { title, text } = extractJobTextFromHtml(html);
-
-    if (!text) {
-      throw new Error(
-        'No job text could be extracted. The page may require JavaScript rendering.',
-      );
-    }
-
-    return {
-      url: url.toString(),
-      title,
-      text,
-    };
-  } finally {
-    clearTimeout(timeout);
   }
+
+  if (!text || text.length < MIN_EXTRACTED_CHARS) {
+    throw new Error(
+      'No job text could be extracted. This site may require JavaScript rendering, be behind a login/paywall, or block automated requests. Try a different public job-posting URL (often the company careers page works best).',
+    );
+  }
+
+  return {
+    url: url.toString(),
+    title,
+    text,
+  };
 }

@@ -10,6 +10,25 @@ type TailorResponse = { runId: string } | { error: string };
 const LS_RESUME_ID = 'resumealign:lastResumeId';
 const LS_JOB_ID = 'resumealign:lastJobId';
 
+function isPlausibleConvexId(value: string) {
+  const v = value.trim();
+  // Convex ids are opaque strings; keep this permissive to avoid false rejects.
+  // We mainly want to block empty/whitespace and obvious placeholders.
+  if (v.length < 5) return false;
+  if (v.length > 256) return false;
+  if (/\s/.test(v)) return false;
+  return true;
+}
+
+function isNonPlaceholderId(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const v = value.trim();
+  if (!v) return false;
+  if (/^undefined$/i.test(v)) return false;
+  if (/^null$/i.test(v)) return false;
+  return true;
+}
+
 export function TailorRunner() {
   const { toast } = useToast();
   const [resumeId, setResumeId] = React.useState('');
@@ -30,8 +49,8 @@ export function TailorRunner() {
     try {
       const r = window.localStorage.getItem(LS_RESUME_ID) ?? '';
       const j = window.localStorage.getItem(LS_JOB_ID) ?? '';
-      if (r && !resumeId) setResumeId(r);
-      if (j && !jobId) setJobId(j);
+      if (r && !resumeId && isPlausibleConvexId(r)) setResumeId(r);
+      if (j && !jobId && isPlausibleConvexId(j)) setJobId(j);
     } catch {
       // ignore
     }
@@ -44,11 +63,35 @@ export function TailorRunner() {
     setError(null);
     setRunId('');
 
+    const trimmedResumeId = resumeId.trim();
+    const trimmedJobId = jobId.trim();
+
+    if (!isPlausibleConvexId(trimmedResumeId)) {
+      const msg =
+        'Resume id looks invalid. Upload + Save a resume first (Step 1), then paste the saved id here.';
+      setError(msg);
+      toast({ variant: 'error', message: msg });
+      setIsRunning(false);
+      return;
+    }
+
+    if (!isPlausibleConvexId(trimmedJobId)) {
+      const msg =
+        'Job id looks invalid. Extract + Save a job first (Step 2), then paste the saved id here.';
+      setError(msg);
+      toast({ variant: 'error', message: msg });
+      setIsRunning(false);
+      return;
+    }
+
     try {
       const res = await fetch('/api/tailor', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ resumeId, jobId }),
+        body: JSON.stringify({
+          resumeId: trimmedResumeId,
+          jobId: trimmedJobId,
+        }),
       });
 
       const data = (await res.json()) as TailorResponse;
@@ -62,6 +105,14 @@ export function TailorRunner() {
       if ('error' in data) {
         setError(data.error);
         toast({ variant: 'error', message: data.error });
+        return;
+      }
+
+      if (!('runId' in data) || !isNonPlaceholderId(data.runId)) {
+        const msg =
+          'Tailoring run was created, but the server did not return a valid run id. Please try again or open the dashboard to find the latest run.';
+        setError(msg);
+        toast({ variant: 'error', message: msg });
         return;
       }
 
@@ -117,7 +168,7 @@ export function TailorRunner() {
             {isRunning ? 'Running…' : 'Run tailoring'}
           </button>
 
-          {runId ? (
+          {isNonPlaceholderId(runId) ? (
             <div className="flex flex-wrap items-center gap-2">
               <a className="text-sm underline" href={`/results/${runId}`}>
                 View results

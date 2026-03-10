@@ -1,10 +1,14 @@
 import Link from 'next/link';
-import { ConvexHttpClient } from 'convex/browser';
 import { api } from '@/convex/_generated/api';
 import { MockModeBanner } from '@/components/MockModeBanner';
 import { InlineAlert } from '@/components/InlineAlert';
 import { CopyButton } from '@/components/CopyButton';
 import { Button } from '@/components/ui/button';
+import {
+  AuthenticationRequiredError,
+  MissingConvexUrlError,
+  createAuthenticatedServerConvexClient,
+} from '@/lib/convexServerClient';
 import {
   Card,
   CardContent,
@@ -13,24 +17,44 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Plus } from 'lucide-react';
+import { redirect } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
-const hasClerkKeys = Boolean(
-  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY,
-);
-
-async function getUserId(): Promise<string> {
-  if (!hasClerkKeys) return 'anonymous';
-  const mod = await import('@clerk/nextjs/server');
-  const { userId } = await mod.auth();
-  return userId ?? 'anonymous';
-}
-
 export default async function DashboardPage() {
-  const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+  let client;
+  try {
+    client = await createAuthenticatedServerConvexClient();
+  } catch (error) {
+    if (error instanceof MissingConvexUrlError) {
+      return (
+        <main className="mx-auto max-w-3xl p-4 sm:p-6">
+          <h1 className="text-2xl font-semibold">Dashboard</h1>
+          <p className="mt-2 text-slate-600">
+            Convex is not configured yet. Set{' '}
+            <span className="font-mono">NEXT_PUBLIC_CONVEX_URL</span> in{' '}
+            <span className="font-mono">.env.local</span>.
+          </p>
+          <div className="mt-6">
+            <Link
+              href="/upload"
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+            >
+              Go to Upload
+            </Link>
+          </div>
+        </main>
+      );
+    }
 
-  if (!convexUrl) {
+    if (error instanceof AuthenticationRequiredError) {
+      redirect('/sign-in');
+    }
+
+    throw error;
+  }
+
+  if (!client) {
     return (
       <main className="mx-auto max-w-3xl p-4 sm:p-6">
         <h1 className="text-2xl font-semibold">Dashboard</h1>
@@ -51,9 +75,6 @@ export default async function DashboardPage() {
     );
   }
 
-  const userId = await getUserId();
-  const client = new ConvexHttpClient(convexUrl);
-
   let resumes: Array<{
     _id: string;
     _creationTime: number;
@@ -70,20 +91,20 @@ export default async function DashboardPage() {
   let convexError: string | null = null;
 
   try {
-    resumes = await client.query(api.resumes.listMine, { userId });
+    resumes = await client.query(api.resumes.listMine, {});
   } catch (e) {
     convexError = e instanceof Error ? e.message : 'Failed to load resumes.';
   }
 
   try {
-    jobs = await client.query(api.jobs.listMine, { userId });
+    jobs = await client.query(api.jobs.listMine, {});
   } catch (e) {
     convexError =
       convexError ?? (e instanceof Error ? e.message : 'Failed to load jobs.');
   }
 
   try {
-    runs = await client.query(api.tailoringRuns.listMine, { userId });
+    runs = await client.query(api.tailoringRuns.listMine, {});
   } catch (e) {
     convexError =
       convexError ??
@@ -144,7 +165,7 @@ export default async function DashboardPage() {
                 >
                   <div className="flex justify-between items-start mb-2">
                     <div
-                      className="font-semibold text-sm truncate pr-2 max-w-[150px]"
+                      className="font-semibold text-sm truncate pr-2 max-w-37.5"
                       title={r.filename}
                     >
                       {r.filename ?? 'Untitled'}
@@ -184,7 +205,7 @@ export default async function DashboardPage() {
                 >
                   <div className="flex justify-between items-start mb-2">
                     <div
-                      className="font-semibold text-sm truncate pr-2 max-w-[150px]"
+                      className="font-semibold text-sm truncate pr-2 max-w-37.5"
                       title={j.sourceUrl}
                     >
                       {j.sourceUrl

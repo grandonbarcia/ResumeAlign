@@ -92,6 +92,7 @@ export const TailoredResumeSchema = z
             field: z.string().min(1).optional(),
             startDate: z.string().min(1).optional(),
             endDate: z.string().min(1).optional(),
+            location: z.string().min(1).optional(),
           })
           .strict(),
       )

@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { ClerkProvider } from '@clerk/nextjs';
+import { ConvexAuthNextjsServerProvider } from '@convex-dev/auth/nextjs/server';
 import { Geist, Geist_Mono } from 'next/font/google';
 import { ToastProvider } from '@/components/ToastProvider';
 import { Navbar } from '@/components/Navbar';
@@ -26,7 +26,7 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
 
   const content = (
     <html lang="en">
@@ -34,7 +34,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen flex flex-col`}
       >
         <ToastProvider>
-          <Navbar />
+          <Navbar authEnabled={Boolean(convexUrl)} />
           <main className="flex-1 text-foreground bg-background">
             {children}
           </main>
@@ -43,11 +43,9 @@ export default function RootLayout({
     </html>
   );
 
-  if (!clerkPublishableKey) return content;
+  if (!convexUrl) return content;
 
   return (
-    <ClerkProvider publishableKey={clerkPublishableKey}>
-      {content}
-    </ClerkProvider>
+    <ConvexAuthNextjsServerProvider>{content}</ConvexAuthNextjsServerProvider>
   );
 }

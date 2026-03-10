@@ -1,16 +1,21 @@
+import { getAuthUserId } from '@convex-dev/auth/server';
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 
 export const create = mutation({
   args: {
-    userId: v.string(),
     filename: v.optional(v.string()),
     originalText: v.string(),
     parsed: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) {
+      throw new Error('Authentication required.');
+    }
+
     const id = await ctx.db.insert('resumes', {
-      userId: args.userId,
+      userId,
       filename: args.filename,
       originalText: args.originalText,
       parsed: args.parsed,
@@ -20,8 +25,11 @@ export const create = mutation({
 });
 
 export const listMine = query({
-  args: { userId: v.string() },
-  handler: async (ctx, { userId }) => {
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return [];
+
     return await ctx.db
       .query('resumes')
       .withIndex('by_user', (q) => q.eq('userId', userId))
@@ -31,8 +39,11 @@ export const listMine = query({
 });
 
 export const getMineById = query({
-  args: { userId: v.string(), id: v.id('resumes') },
-  handler: async (ctx, { userId, id }) => {
+  args: { id: v.id('resumes') },
+  handler: async (ctx, { id }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return null;
+
     const doc = await ctx.db.get(id);
     if (!doc || doc.userId !== userId) return null;
     return doc;

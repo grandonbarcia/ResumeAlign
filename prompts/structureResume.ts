@@ -10,7 +10,7 @@ export function structureResumePrompt(args: {
     `Return a JSON object that matches this schema (no markdown, no commentary):\n` +
     `basics{fullName?,email?,phone?,location?,links?[]}, summary?, skills[] (strings), ` +
     `experience[] {company,title,startDate?,endDate?,location?,bullets[]}, ` +
-    `education[] {school,degree?,field?,startDate?,endDate?}, ` +
+    `education[] {school,degree?,field?,startDate?,endDate?,location?}, ` +
     `projects[] {name,description?,bullets[],links?[]}, certifications[] (strings).\n\n` +
     `Filename: ${args.filename ?? '(unknown)'}\n\nRESUME TEXT:\n${args.resumeText}`;
 

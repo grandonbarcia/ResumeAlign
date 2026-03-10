@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { ConvexHttpClient } from 'convex/browser';
 import { api } from '@/convex/_generated/api';
 import { DiffView } from '@/components/DiffView';
 import { ExportButtons } from '@/components/ExportButtons';
@@ -11,58 +10,91 @@ import {
   TailoringResultSchema,
   type TailoringResult,
 } from '@/lib/tailoringSchemas';
+import {
+  AuthenticationRequiredError,
+  MissingConvexUrlError,
+  createAuthenticatedServerConvexClient,
+} from '@/lib/convexServerClient';
+import { redirect } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
-const hasClerkKeys = Boolean(
-  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY,
-);
-
-async function getUserId(): Promise<string> {
-  if (!hasClerkKeys) return 'anonymous';
-  const mod = await import('@clerk/nextjs/server');
-  const { userId } = await mod.auth();
-  return userId ?? 'anonymous';
+function isPlausibleConvexId(value: unknown) {
+  if (typeof value !== 'string') return false;
+  const v = value.trim();
+  // Extremely permissive: we only block empty/whitespace and common placeholders.
+  if (!v) return false;
+  if (/^undefined$/i.test(v)) return false;
+  if (/^null$/i.test(v)) return false;
+  return true;
 }
 
 export default async function ResultDetailPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }> | { id: string };
 }) {
-  const { id } = params;
-  const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+  const { id } = await Promise.resolve(params);
 
-  if (!convexUrl) {
+  if (!isPlausibleConvexId(id)) {
     return (
       <main className="mx-auto max-w-3xl p-4 sm:p-6">
-        <h1 className="text-2xl font-semibold">Results</h1>
-        <p className="mt-2 text-slate-600">
-          Convex is not configured. Set{' '}
-          <span className="font-mono">NEXT_PUBLIC_CONVEX_URL</span>.
-        </p>
-        <div className="mt-6">
-          <Link className="underline" href="/upload">
-            Back to Upload
+        <div className="flex items-center justify-between gap-4">
+          <h1 className="text-2xl font-semibold">Results</h1>
+          <Link className="underline" href="/dashboard">
+            Dashboard
           </Link>
         </div>
+        <InlineAlert variant="warning" className="mt-4">
+          Invalid run id.
+          <div className="mt-2 text-xs text-slate-600">
+            Received: <span className="font-mono break-all">{String(id)}</span>
+          </div>
+        </InlineAlert>
       </main>
     );
   }
 
-  const userId = await getUserId();
-  const client = new ConvexHttpClient(convexUrl);
+  let client;
+  try {
+    client = await createAuthenticatedServerConvexClient();
+  } catch (error) {
+    if (error instanceof MissingConvexUrlError) {
+      return (
+        <main className="mx-auto max-w-3xl p-4 sm:p-6">
+          <h1 className="text-2xl font-semibold">Results</h1>
+          <p className="mt-2 text-slate-600">
+            Convex is not configured. Set{' '}
+            <span className="font-mono">NEXT_PUBLIC_CONVEX_URL</span>.
+          </p>
+          <div className="mt-6">
+            <Link className="underline" href="/upload">
+              Back to Upload
+            </Link>
+          </div>
+        </main>
+      );
+    }
+
+    if (error instanceof AuthenticationRequiredError) {
+      redirect('/sign-in');
+    }
+
+    throw error;
+  }
 
   let run: Doc<'tailoringRuns'> | null = null;
   let error: string | null = null;
 
   try {
     run = await client.query(api.tailoringRuns.getMineById, {
-      userId,
-      id: id as Id<'tailoringRuns'>,
+      id: id.trim() as Id<'tailoringRuns'>,
     });
   } catch (e) {
-    error = e instanceof Error ? e.message : 'Failed to load results.';
+    const msg = e instanceof Error ? e.message : 'Failed to load results.';
+    error = msg.includes('ArgumentValidationError')
+      ? `Invalid run id. Received: ${String(id)}`
+      : msg;
   }
 
   if (error) {

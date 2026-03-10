@@ -1,23 +1,26 @@
+import { authTables } from '@convex-dev/auth/server';
 import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
 
 export default defineSchema({
+  ...authTables,
+
   resumes: defineTable({
-    userId: v.string(),
+    userId: v.id('users'),
     filename: v.optional(v.string()),
     originalText: v.string(),
     parsed: v.optional(v.any()),
   }).index('by_user', ['userId']),
 
   jobs: defineTable({
-    userId: v.string(),
+    userId: v.id('users'),
     sourceUrl: v.optional(v.string()),
     rawText: v.string(),
     structured: v.optional(v.any()),
   }).index('by_user', ['userId']),
 
   tailoringRuns: defineTable({
-    userId: v.string(),
+    userId: v.id('users'),
     resumeId: v.id('resumes'),
     jobId: v.id('jobs'),
     tailored: v.any(),

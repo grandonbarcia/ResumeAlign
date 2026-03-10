@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
-import { ConvexHttpClient } from 'convex/browser';
 import { api } from '@/convex/_generated/api';
 import { runTailorPipeline } from '@/lib/aiPipeline';
 import type { Id } from '@/convex/_generated/dataModel';
+import {
+  AuthenticationRequiredError,
+  MissingConvexUrlError,
+  createAuthenticatedServerConvexClient,
+} from '@/lib/convexServerClient';
 
 export const runtime = 'nodejs';
 
@@ -11,29 +15,17 @@ type Body = {
   jobId: string;
 };
 
-const hasClerkKeys = Boolean(
-  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY,
-);
-
-async function getUserId(): Promise<string> {
-  if (!hasClerkKeys) return 'anonymous';
-  const mod = await import('@clerk/nextjs/server');
-  const { userId } = await mod.auth();
-  return userId ?? 'anonymous';
+function isPlausibleConvexId(value: unknown) {
+  if (typeof value !== 'string') return false;
+  const v = value.trim();
+  // Keep permissive: Convex ids are opaque and may not be strictly alphanumeric.
+  if (v.length < 5) return false;
+  if (v.length > 256) return false;
+  if (/\s/.test(v)) return false;
+  return true;
 }
 
 export async function POST(request: Request) {
-  const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
-  if (!convexUrl) {
-    return NextResponse.json(
-      {
-        error:
-          'NEXT_PUBLIC_CONVEX_URL is not set. Run `npx convex dev` and set it in .env.local to enable tailoring.',
-      },
-      { status: 501 },
-    );
-  }
-
   let body: Body;
   try {
     body = (await request.json()) as Body;
@@ -48,12 +40,20 @@ export async function POST(request: Request) {
     );
   }
 
+  if (!isPlausibleConvexId(body.resumeId) || !isPlausibleConvexId(body.jobId)) {
+    return NextResponse.json(
+      {
+        error:
+          'Invalid resumeId or jobId. Please paste ids created by the Save steps (or pick them from the dashboard).',
+      },
+      { status: 400 },
+    );
+  }
+
   try {
-    const userId = await getUserId();
-    const client = new ConvexHttpClient(convexUrl);
+    const client = await createAuthenticatedServerConvexClient();
 
     const resume = await client.query(api.resumes.getMineById, {
-      userId,
       id: body.resumeId as Id<'resumes'>,
     });
     if (!resume) {
@@ -64,7 +64,6 @@ export async function POST(request: Request) {
     }
 
     const job = await client.query(api.jobs.getMineById, {
-      userId,
       id: body.jobId as Id<'jobs'>,
     });
     if (!job) {
@@ -88,7 +87,6 @@ export async function POST(request: Request) {
     });
 
     const runId = await client.mutation(api.tailoringRuns.create, {
-      userId,
       resumeId: resume._id,
       jobId: job._id,
       tailored: result,
@@ -99,9 +97,39 @@ export async function POST(request: Request) {
       },
     });
 
-    return NextResponse.json({ runId });
+    if (!runId) {
+      return NextResponse.json(
+        {
+          error:
+            'Failed to create tailoring run (no id returned). Please try again.',
+        },
+        { status: 502 },
+      );
+    }
+
+    return NextResponse.json({ runId: String(runId) });
   } catch (error) {
+    if (error instanceof MissingConvexUrlError) {
+      return NextResponse.json({ error: error.message }, { status: 501 });
+    }
+
+    if (error instanceof AuthenticationRequiredError) {
+      return NextResponse.json({ error: error.message }, { status: 401 });
+    }
+
     const message = error instanceof Error ? error.message : 'Unknown error';
+
+    // Convex throws ArgumentValidationError if ids are malformed; surface a clean 400.
+    if (message.includes('ArgumentValidationError')) {
+      return NextResponse.json(
+        {
+          error:
+            'Invalid resumeId or jobId. Please paste ids created by the Save steps (or pick them from the dashboard).',
+        },
+        { status: 400 },
+      );
+    }
+
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
