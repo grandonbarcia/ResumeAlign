@@ -7,7 +7,9 @@ import {
   BulletRewriteSchema,
   GapAnalysisSchema,
   SkillsOptimizeSchema,
+  SkillsRewriteSchema,
   TailoringResultSchema,
+  type GapAnalysis,
   type TailoringResult,
   type TailoredResume,
 } from '@/lib/tailoringSchemas';
@@ -71,6 +73,204 @@ function buildSkillCanonicalMap(skills: string[]) {
   return map;
 }
 
+const SKILL_STOP_WORDS = new Set([
+  'and',
+  'or',
+  'the',
+  'a',
+  'an',
+  'of',
+  'to',
+  'for',
+  'with',
+  'in',
+  'on',
+  'using',
+  'plus',
+  'basic',
+]);
+
+function tokenizeSkillPhrase(value: string) {
+  const matches = value.toLowerCase().match(/[a-z0-9+#.]+/g) ?? [];
+  return matches.filter(
+    (token) => token.length >= 2 && !SKILL_STOP_WORDS.has(token),
+  );
+}
+
+function textSupportsSkill(text: string, skill: string) {
+  const normalizedText = text.toLowerCase();
+  const tokens = tokenizeSkillPhrase(skill);
+  if (!tokens.length) return false;
+
+  const significantTokens = tokens.filter(
+    (token) => token.length >= 3 || /[+#.]/.test(token),
+  );
+  const requiredTokens = significantTokens.length ? significantTokens : tokens;
+
+  return requiredTokens.every((token) => normalizedText.includes(token));
+}
+
+function filterToGroundedSkills(args: {
+  skills: string[];
+  resume: StructuredResume;
+  job: StructuredJob;
+  gap: GapAnalysis;
+}) {
+  const resumeEvidenceText = buildResumeEvidenceText(args.resume);
+  const resumeDerivedMap = buildSkillCanonicalMap(
+    uniqueByKey([
+      ...(args.resume.skills ?? []),
+      ...extractKeywords(resumeEvidenceText),
+      ...extractTechLikeTokens(resumeEvidenceText),
+    ]),
+  );
+
+  const jobEvidenceText = [
+    args.job.title,
+    args.job.summary,
+    ...(args.job.skills ?? []),
+    ...(args.job.keywords ?? []),
+    ...(args.job.responsibilities ?? []),
+    ...(args.job.requirements ?? []),
+    ...(args.gap.matchedKeywords ?? []),
+    ...(args.gap.missingKeywords ?? []),
+  ]
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .join('\n');
+
+  const jobDerivedMap = buildSkillCanonicalMap(
+    uniqueByKey([
+      ...(args.job.skills ?? []),
+      ...(args.job.keywords ?? []),
+      ...(args.gap.matchedKeywords ?? []),
+      ...(args.gap.missingKeywords ?? []),
+    ]),
+  );
+
+  const originalMap = buildSkillCanonicalMap(args.resume.skills ?? []);
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  for (const skill of args.skills) {
+    const cleaned = skill.trim().replace(/\s+/g, ' ');
+    const key = normalizeKey(cleaned);
+    if (!key || seen.has(key)) continue;
+
+    const originalSkill = originalMap.get(key);
+    if (originalSkill) {
+      seen.add(key);
+      out.push(originalSkill);
+      continue;
+    }
+
+    const canonicalResumeSkill = resumeDerivedMap.get(key);
+    const canonicalJobSkill = jobDerivedMap.get(key);
+    const hasResumeSupport =
+      Boolean(canonicalResumeSkill) ||
+      textSupportsSkill(resumeEvidenceText, cleaned);
+    const hasJobSupport =
+      Boolean(canonicalJobSkill) || textSupportsSkill(jobEvidenceText, cleaned);
+
+    if (!hasResumeSupport || !hasJobSupport) {
+      continue;
+    }
+
+    const finalSkill = canonicalJobSkill ?? canonicalResumeSkill ?? cleaned;
+    const finalKey = normalizeKey(finalSkill);
+    if (seen.has(finalKey)) continue;
+    seen.add(finalKey);
+    out.push(finalSkill);
+  }
+
+  return out;
+}
+
+function buildJobEvidenceText(job: StructuredJob, gap: GapAnalysis): string {
+  return [
+    job.title,
+    job.summary,
+    ...(job.skills ?? []),
+    ...(job.keywords ?? []),
+    ...(job.responsibilities ?? []),
+    ...(job.requirements ?? []),
+    ...(gap.matchedKeywords ?? []),
+    ...(gap.missingKeywords ?? []),
+  ]
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .join('\n');
+}
+
+function suggestGroundedJobSkillAdditions(args: {
+  resume: StructuredResume;
+  job: StructuredJob;
+  gap: GapAnalysis;
+  existingSkills: string[];
+  limit?: number;
+}) {
+  const resumeEvidenceText = buildResumeEvidenceText(args.resume);
+  const jobEvidenceText = buildJobEvidenceText(args.job, args.gap);
+  const existingKeys = new Set(args.existingSkills.map(normalizeKey));
+  const originalKeys = new Set((args.resume.skills ?? []).map(normalizeKey));
+
+  const candidates = filterToGroundedSkills({
+    skills: uniqueByKey([
+      ...(args.job.skills ?? []),
+      ...(args.job.keywords ?? []),
+      ...(args.gap.matchedKeywords ?? []),
+      ...extractKeywords(jobEvidenceText),
+      ...extractTechLikeTokens(jobEvidenceText),
+    ]),
+    resume: args.resume,
+    job: args.job,
+    gap: args.gap,
+  });
+
+  const additions = candidates.filter((skill) => {
+    const key = normalizeKey(skill);
+    if (!key || existingKeys.has(key)) return false;
+    if (originalKeys.has(key)) return false;
+
+    return textSupportsSkill(resumeEvidenceText, skill);
+  });
+
+  return additions.slice(0, args.limit ?? 8);
+}
+
+function buildSkillsRewrite(args: {
+  originalSkills: string[];
+  finalSkills: string[];
+  rationale: string[];
+}) {
+  const rewrittenSkills = args.finalSkills
+    .map((after, index) => {
+      const before = args.originalSkills[index];
+      if (before && normalizeKey(before) === normalizeKey(after)) {
+        return null;
+      }
+
+      const rationale = before
+        ? 'Replaced with a skill better aligned to the job description and supported by resume evidence.'
+        : "Added because it matches the job description and is supported by the candidate's resume evidence.";
+
+      return {
+        before,
+        after,
+        rationale: args.rationale[0] || rationale,
+      };
+    })
+    .filter(
+      (item): item is { before?: string; after: string; rationale: string } =>
+        Boolean(item),
+    );
+
+  return SkillsRewriteSchema.parse({
+    rewrittenSkills,
+    notes: rewrittenSkills.length
+      ? 'Skills were rewritten from the submitted resume to better match the target job while staying grounded in resume evidence.'
+      : undefined,
+  });
+}
+
 function filterToAllowedSkills(args: {
   skills: string[];
   allowed: Map<string, string>;
@@ -87,6 +287,47 @@ function filterToAllowedSkills(args: {
     out.push(canonical);
   }
   return out;
+}
+
+const KEYWORD_PATTERNS: Array<{ label: string; re: RegExp }> = [
+  { label: 'TypeScript', re: /\btypescript\b/i },
+  { label: 'JavaScript', re: /\bjavascript\b/i },
+  { label: 'React', re: /\breact\b/i },
+  { label: 'Next.js', re: /\bnext(\.js)?\b/i },
+  { label: 'Node.js', re: /\bnode(\.js)?\b/i },
+  { label: 'Tailwind CSS', re: /\btailwind\b/i },
+  { label: 'HTML', re: /\bhtml\b/i },
+  { label: 'CSS', re: /\bcss\b/i },
+  { label: 'REST', re: /\brest\b/i },
+  { label: 'GraphQL', re: /\bgraphql\b/i },
+  { label: 'SQL', re: /\bsql\b/i },
+  { label: 'PostgreSQL', re: /\bpostgres(ql)?\b/i },
+  { label: 'MongoDB', re: /\bmongo(db)?\b/i },
+  { label: 'AWS', re: /\baws\b|amazon web services/i },
+  { label: 'Docker', re: /\bdocker\b/i },
+  { label: 'Kubernetes', re: /\bkubernetes\b|\bk8s\b/i },
+  { label: 'Python', re: /\bpython\b/i },
+  { label: 'Java', re: /\bjava\b/i },
+  { label: 'C#', re: /\bc#\b/i },
+  {
+    label: 'Testing',
+    re: /\b(unit tests?|integration tests?|jest|vitest|playwright)\b/i,
+  },
+  {
+    label: 'CI/CD',
+    re: /\bci\/?cd\b|continuous integration|continuous delivery/i,
+  },
+  { label: 'Agile', re: /\bagile\b|scrum|kanban/i },
+  { label: 'Communication', re: /\bcommunication\b/i },
+  { label: 'Leadership', re: /\bleadership\b/i },
+];
+
+function extractKeywords(text: string): string[] {
+  const out: string[] = [];
+  for (const { label, re } of KEYWORD_PATTERNS) {
+    if (re.test(text)) out.push(label);
+  }
+  return uniqueByKey(out);
 }
 
 function extractNumberTokens(text: string): string[] {
@@ -450,9 +691,11 @@ export async function runTailorPipeline(
   });
 
   const originalSkills = [...rewrittenResume.skills];
+  const resumeEvidenceText = buildResumeEvidenceText(rewrittenResume);
 
   const skillsPrompt = skillsOptimizePrompt({
     resumeSkills: rewrittenResume.skills,
+    resumeEvidenceText,
     structuredJobJson,
     gapAnalysisJson,
   });
@@ -474,19 +717,23 @@ export async function runTailorPipeline(
         });
       })();
 
-  // Enforce: every skill must come from rewrittenResume.skills.
-  const allowedSkillMap = buildSkillCanonicalMap(rewrittenResume.skills ?? []);
-  const primary = filterToAllowedSkills({
+  const primary = filterToGroundedSkills({
     skills: skillsOptimize.primary ?? [],
-    allowed: allowedSkillMap,
+    resume: rewrittenResume,
+    job: structuredJob,
+    gap: safeGapAnalysis,
   });
-  const secondary = filterToAllowedSkills({
+  const secondary = filterToGroundedSkills({
     skills: skillsOptimize.secondary ?? [],
-    allowed: allowedSkillMap,
+    resume: rewrittenResume,
+    job: structuredJob,
+    gap: safeGapAnalysis,
   }).filter((s) => !new Set(primary.map(normalizeKey)).has(normalizeKey(s)));
-  const other = filterToAllowedSkills({
+  const other = filterToGroundedSkills({
     skills: skillsOptimize.other ?? [],
-    allowed: allowedSkillMap,
+    resume: rewrittenResume,
+    job: structuredJob,
+    gap: safeGapAnalysis,
   }).filter((s) => {
     const key = normalizeKey(s);
     return (
@@ -495,13 +742,37 @@ export async function runTailorPipeline(
     );
   });
 
+  const prioritizedPrimary = primary.length
+    ? primary
+    : uniqueByKey([
+        ...(safeGapAnalysis.matchedKeywords ?? []),
+        ...(rewrittenResume.skills ?? []),
+      ]).slice(0, 12);
+
+  const jobAlignedAdditions = suggestGroundedJobSkillAdditions({
+    resume: rewrittenResume,
+    job: structuredJob,
+    gap: safeGapAnalysis,
+    existingSkills: [...prioritizedPrimary, ...secondary, ...other],
+  });
+
+  const enrichedPrimary = uniqueByKey([
+    ...jobAlignedAdditions,
+    ...prioritizedPrimary,
+  ]).slice(0, 12);
+
   const safeSkillsOptimize = SkillsOptimizeSchema.parse({
     ...skillsOptimize,
-    primary: primary.length
-      ? primary
-      : uniqueByKey(rewrittenResume.skills ?? []).slice(0, 12),
+    primary: enrichedPrimary,
     secondary,
     other,
+    rationale: uniqueByKey([
+      ...jobAlignedAdditions.map(
+        (skill) =>
+          `Added ${skill} because it is relevant to the job description and supported by the resume evidence.`,
+      ),
+      ...(skillsOptimize.rationale ?? []),
+    ]),
   });
 
   const skills = [
@@ -509,6 +780,12 @@ export async function runTailorPipeline(
     ...safeSkillsOptimize.secondary,
     ...safeSkillsOptimize.other,
   ];
+
+  const skillsRewrite = buildSkillsRewrite({
+    originalSkills,
+    finalSkills: skills,
+    rationale: safeSkillsOptimize.rationale,
+  });
 
   const tailored = buildTailoredResume({
     structuredResume: rewrittenResume,
@@ -525,6 +802,7 @@ export async function runTailorPipeline(
     gapAnalysis: safeGapAnalysis,
     bulletRewrite,
     skillsOptimize: safeSkillsOptimize,
+    skillsRewrite,
   } satisfies TailoringResult;
 
   return TailoringResultSchema.parse(result);

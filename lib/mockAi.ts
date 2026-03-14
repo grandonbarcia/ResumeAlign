@@ -337,20 +337,46 @@ export function mockSkillsOptimize(args: {
 }): SkillsOptimize {
   const resumeSkills = uniqueStrings(args.resume.skills ?? []);
   const jobSkills = uniqueStrings(args.job.skills ?? []);
+  const evidenceSkills = uniqueStrings([
+    ...extractKeywords(
+      args.resume.experience.map((exp) => exp.bullets.join(' ')).join(' '),
+    ),
+    ...extractSkillLikeTokens(
+      args.resume.experience.map((exp) => exp.bullets.join(' ')).join(' '),
+    ),
+    ...extractKeywords(
+      args.resume.projects.map((proj) => proj.bullets.join(' ')).join(' '),
+    ),
+  ]);
 
   const resumeSet = new Set(resumeSkills.map((s) => s.toLowerCase()));
   const jobSet = new Set(jobSkills.map((s) => s.toLowerCase()));
 
-  const primary = jobSkills.slice(0, 12);
-  const secondary = resumeSkills
-    .filter((s) => !jobSet.has(s.toLowerCase()))
-    .slice(0, 12);
+  const primary = uniqueStrings([
+    ...jobSkills.filter(
+      (skill) =>
+        resumeSet.has(skill.toLowerCase()) ||
+        evidenceSkills.some(
+          (evidence) => evidence.toLowerCase() === skill.toLowerCase(),
+        ),
+    ),
+    ...evidenceSkills.filter((skill) => jobSet.has(skill.toLowerCase())),
+  ]).slice(0, 12);
+
+  const secondary = uniqueStrings([
+    ...resumeSkills.filter((s) => !jobSet.has(s.toLowerCase())),
+    ...evidenceSkills.filter(
+      (s) => !jobSet.has(s.toLowerCase()) && !resumeSet.has(s.toLowerCase()),
+    ),
+  ]).slice(0, 12);
   const other = uniqueStrings([
     ...(args.gap.matchedKeywords ?? []),
     ...(args.gap.missingKeywords ?? []),
   ])
-    .filter(
-      (s) => !resumeSet.has(s.toLowerCase()) && !jobSet.has(s.toLowerCase()),
+    .filter((s) =>
+      evidenceSkills.some(
+        (evidence) => evidence.toLowerCase() === s.toLowerCase(),
+      ),
     )
     .slice(0, 12);
 
@@ -358,8 +384,10 @@ export function mockSkillsOptimize(args: {
     primary.length
       ? `Prioritized job-relevant skills first: ${primary.slice(0, 5).join(', ')}.`
       : '',
-    secondary.length ? 'Kept additional resume skills as secondary.' : '',
-    'Order skills by relevance to the target job description.',
+    secondary.length
+      ? 'Kept additional resume-backed skills as secondary.'
+      : '',
+    'Order skills by job relevance while staying grounded in the submitted resume evidence.',
   ]).filter(Boolean);
 
   return SkillsOptimizeSchema.parse({

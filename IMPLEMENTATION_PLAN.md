@@ -8,12 +8,12 @@ This document outlines the implementation roadmap for the ResumeAlign applicatio
 
 ## Phase 1: Project Foundation
 
-| Task | Description                                                                                   | Status |
-| ---- | --------------------------------------------------------------------------------------------- | ------ |
-| 1.1  | Install dependencies: `shadcn/ui`, `openai`, `pdf-parse`, `mammoth` (DOCX), `clerk`, `convex` | ✅     |
-| 1.2  | Set up Clerk authentication                                                                   | ✅     |
-| 1.3  | Configure Convex schema for resumes, jobs, and tailored results                               | ✅     |
-| 1.4  | Create folder structure: `/lib`, `/prompts`, `/app/dashboard`, `/app/upload`, `/app/results`  | ✅     |
+| Task | Description                                                                                  | Status |
+| ---- | -------------------------------------------------------------------------------------------- | ------ |
+| 1.1  | Install dependencies: `shadcn/ui`, `openai`, `pdf-parse`, `mammoth` (DOCX)                   | ✅     |
+| 1.2  | Set up local app persistence                                                                 | ✅     |
+| 1.3  | Define storage model for resumes, jobs, and tailored results                                 | ✅     |
+| 1.4  | Create folder structure: `/lib`, `/prompts`, `/app/dashboard`, `/app/upload`, `/app/results` | ✅     |
 
 ---
 
@@ -24,7 +24,7 @@ This document outlines the implementation roadmap for the ResumeAlign applicatio
 | 2.1  | Build upload UI with drag-and-drop (PDF, DOCX, TXT)                              | ✅     |
 | 2.2  | Create `resumeParser.ts` — extract text from PDF/DOCX                            | ✅     |
 | 2.3  | AI-powered resume structuring into JSON (contact, experience, education, skills) | ✅     |
-| 2.4  | Store parsed resume in Convex                                                    | ✅     |
+| 2.4  | Store parsed resume locally                                                      | ✅     |
 
 ---
 
@@ -35,7 +35,7 @@ This document outlines the implementation roadmap for the ResumeAlign applicatio
 | 3.1  | Build job URL input component                                         | ✅     |
 | 3.2  | Create `jobExtractor.ts` — fetch and extract job description from URL | ✅     |
 | 3.3  | AI-powered job structuring (requirements, responsibilities, keywords) | ✅     |
-| 3.4  | Store structured job data in Convex                                   | ✅     |
+| 3.4  | Store structured job data locally                                     | ✅     |
 
 ---
 
@@ -105,10 +105,6 @@ This document outlines the implementation roadmap for the ResumeAlign applicatio
   gapAnalysis.ts    → Resume vs job gap analysis
   bulletRewrite.ts  → Bullet-level rewriting
   skillsOptimize.ts → Skills optimization
-/convex
-  schema.ts         → Database schema
-  resumes.ts        → Resume mutations/queries
-  jobs.ts           → Job mutations/queries
 /components
   ResumeUploader.tsx
   JobUrlInput.tsx
@@ -154,7 +150,7 @@ The AI prompts must enforce:
 
 | Date       | Task Completed                                          | Notes                                                               |
 | ---------- | ------------------------------------------------------- | ------------------------------------------------------------------- |
-| 2026-01-28 | Phase 4 pipeline + /api/tailor + results page (initial) | Added prompts, orchestration, Convex tailoringRuns, and results UI. |
+| 2026-01-28 | Phase 4 pipeline + /api/tailor + results page (initial) | Added prompts, orchestration, stored runs, and results UI.          |
 | 2026-01-28 | Phase 5 skills diff + rationale                         | Show original vs optimized skills, movement, and reasoning.         |
 | 2026-01-28 | Phase 6 export (PDF + DOCX)                             | Added server export routes and results page download buttons.       |
 | 2026-01-28 | Mock AI fallback mode                                   | App runs without `OPENAI_API_KEY` via heuristic mock provider.      |

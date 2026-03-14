@@ -1,28 +1,86 @@
 import Link from 'next/link';
-import { api } from '@/convex/_generated/api';
+import { CopyButton } from '@/components/CopyButton';
 import { DiffView } from '@/components/DiffView';
 import { ExportButtons } from '@/components/ExportButtons';
-import { MockModeBanner } from '@/components/MockModeBanner';
 import { InlineAlert } from '@/components/InlineAlert';
-import { CopyButton } from '@/components/CopyButton';
-import type { Doc, Id } from '@/convex/_generated/dataModel';
+import { MockModeBanner } from '@/components/MockModeBanner';
+import { ResumeTextPreview } from '@/components/ResumeTextPreview';
+import { getResumeById, getTailoringRunById } from '@/lib/localStore';
 import {
   TailoringResultSchema,
   type TailoringResult,
 } from '@/lib/tailoringSchemas';
-import {
-  AuthenticationRequiredError,
-  MissingConvexUrlError,
-  createAuthenticatedServerConvexClient,
-} from '@/lib/convexServerClient';
-import { redirect } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
-function isPlausibleConvexId(value: unknown) {
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildFlexibleWhitespacePattern(value: string) {
+  return escapeRegExp(value.trim()).replace(/\s+/g, '\\s+');
+}
+
+function applyBulletRewritesToPreviewText(args: {
+  originalText: string;
+  renderedText: string;
+  bulletRewrite: TailoringResult['bulletRewrite'] | null | undefined;
+}) {
+  const sourceText = args.originalText.trim() || args.renderedText.trim();
+  if (!sourceText) return '';
+  if (!args.bulletRewrite?.experience?.length) return sourceText;
+
+  let nextText = sourceText;
+
+  for (const experience of args.bulletRewrite.experience) {
+    for (const bullet of experience.rewrittenBullets) {
+      const before = bullet.before.trim();
+      const after = bullet.after.trim();
+      if (!before || !after) continue;
+
+      const pattern = buildFlexibleWhitespacePattern(before);
+      const regex = new RegExp(pattern);
+      if (regex.test(nextText)) {
+        nextText = nextText.replace(regex, after);
+      }
+    }
+  }
+
+  return nextText;
+}
+
+function applySkillsRewriteToPreviewText(args: {
+  text: string;
+  skillsRewrite: TailoringResult['skillsRewrite'] | null | undefined;
+}) {
+  if (!args.text.trim()) return '';
+
+  const finalSkills =
+    args.skillsRewrite?.rewrittenSkills
+      .map((skill) => skill.after.trim())
+      .filter(Boolean) ?? [];
+
+  if (!finalSkills.length) {
+    return args.text;
+  }
+
+  const nextSkillsBlock = finalSkills.join(' • ');
+  const skillsSectionRegex =
+    /(\bSKILLS\b\s*)([\s\S]*?)(?=\b(?:WORK EXPERIENCE|EXPERIENCE|EDUCATION|PROJECTS|CERTIFICATIONS|ACHIEVEMENTS|SUMMARY)\b|$)/i;
+
+  if (skillsSectionRegex.test(args.text)) {
+    return args.text.replace(
+      skillsSectionRegex,
+      (_, heading: string) => `${heading}${nextSkillsBlock} `,
+    );
+  }
+
+  return `SKILLS ${nextSkillsBlock}\n\n${args.text}`;
+}
+
+function isPlausibleStoredId(value: unknown) {
   if (typeof value !== 'string') return false;
   const v = value.trim();
-  // Extremely permissive: we only block empty/whitespace and common placeholders.
   if (!v) return false;
   if (/^undefined$/i.test(v)) return false;
   if (/^null$/i.test(v)) return false;
@@ -36,9 +94,9 @@ export default async function ResultDetailPage({
 }) {
   const { id } = await Promise.resolve(params);
 
-  if (!isPlausibleConvexId(id)) {
+  if (!isPlausibleStoredId(id)) {
     return (
-      <main className="mx-auto max-w-3xl p-4 sm:p-6">
+      <main className="mx-auto max-w-7xl p-4 sm:p-6">
         <div className="flex items-center justify-between gap-4">
           <h1 className="text-2xl font-semibold">Results</h1>
           <Link className="underline" href="/dashboard">
@@ -55,51 +113,22 @@ export default async function ResultDetailPage({
     );
   }
 
-  let client;
-  try {
-    client = await createAuthenticatedServerConvexClient();
-  } catch (error) {
-    if (error instanceof MissingConvexUrlError) {
-      return (
-        <main className="mx-auto max-w-3xl p-4 sm:p-6">
-          <h1 className="text-2xl font-semibold">Results</h1>
-          <p className="mt-2 text-slate-600">
-            Convex is not configured. Set{' '}
-            <span className="font-mono">NEXT_PUBLIC_CONVEX_URL</span>.
-          </p>
-          <div className="mt-6">
-            <Link className="underline" href="/upload">
-              Back to Upload
-            </Link>
-          </div>
-        </main>
-      );
-    }
-
-    if (error instanceof AuthenticationRequiredError) {
-      redirect('/sign-in');
-    }
-
-    throw error;
-  }
-
-  let run: Doc<'tailoringRuns'> | null = null;
+  let run = null;
+  let resume = null;
   let error: string | null = null;
 
   try {
-    run = await client.query(api.tailoringRuns.getMineById, {
-      id: id.trim() as Id<'tailoringRuns'>,
-    });
+    run = await getTailoringRunById(id.trim());
+    if (run?.resumeId) {
+      resume = await getResumeById(run.resumeId);
+    }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Failed to load results.';
-    error = msg.includes('ArgumentValidationError')
-      ? `Invalid run id. Received: ${String(id)}`
-      : msg;
+    error = e instanceof Error ? e.message : 'Failed to load results.';
   }
 
   if (error) {
     return (
-      <main className="mx-auto max-w-3xl p-4 sm:p-6">
+      <main className="mx-auto max-w-7xl p-4 sm:p-6">
         <div className="flex items-center justify-between gap-4">
           <h1 className="text-2xl font-semibold">Results</h1>
           <Link className="underline" href="/dashboard">
@@ -115,7 +144,7 @@ export default async function ResultDetailPage({
 
   if (!run) {
     return (
-      <main className="mx-auto max-w-3xl p-4 sm:p-6">
+      <main className="mx-auto max-w-7xl p-4 sm:p-6">
         <div className="flex items-center justify-between gap-4">
           <h1 className="text-2xl font-semibold">Results</h1>
           <Link className="underline" href="/dashboard">
@@ -135,8 +164,10 @@ export default async function ResultDetailPage({
   }
 
   const renderedText: string = tailored?.renderedText ?? '';
+  const originalResumeText: string = resume?.originalText ?? '';
   const gapAnalysis = tailored?.gapAnalysis;
   const skillsOptimize = tailored?.skillsOptimize;
+  const skillsRewrite = tailored?.skillsRewrite;
   const bulletRewrite = tailored?.bulletRewrite;
   const originalSkillsRaw = tailored?.originalSkills;
   const optimizedSkillsRaw = tailored?.tailored?.skills;
@@ -189,8 +220,35 @@ export default async function ResultDetailPage({
     .slice(0, 12)
     .map((x) => x.s);
 
+  const rewrittenBulletLines =
+    bulletRewrite?.experience.flatMap((exp) =>
+      exp.rewrittenBullets.map((bullet) => bullet.after),
+    ) ?? [];
+  const overwrittenBulletLines =
+    bulletRewrite?.experience.flatMap((exp) =>
+      exp.rewrittenBullets.map((bullet) => bullet.before),
+    ) ?? [];
+
+  const rewrittenSkillLines =
+    skillsRewrite?.rewrittenSkills.map((skill) => skill.after) ?? [];
+  const overwrittenSkillLines =
+    skillsRewrite?.rewrittenSkills
+      .map((skill) => skill.before)
+      .filter((skill): skill is string => Boolean(skill)) ?? [];
+
+  const bulletRewrittenPreviewText = applyBulletRewritesToPreviewText({
+    originalText: originalResumeText,
+    renderedText,
+    bulletRewrite,
+  });
+
+  const tailoredPreviewText = applySkillsRewriteToPreviewText({
+    text: bulletRewrittenPreviewText,
+    skillsRewrite,
+  });
+
   return (
-    <main className="mx-auto max-w-3xl p-4 sm:p-6">
+    <main className="mx-auto max-w-7xl p-4 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold">Tailoring results</h1>
         <div className="flex flex-wrap items-center gap-4">
@@ -209,10 +267,10 @@ export default async function ResultDetailPage({
 
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
         <div className="min-w-0">
-          Run id: <span className="font-mono break-all">{run._id}</span>
+          Run id: <span className="font-mono break-all">{run.id}</span>
         </div>
         <CopyButton
-          text={String(run._id)}
+          text={String(run.id)}
           label="Copy"
           ariaLabel="Copy run id"
         />
@@ -221,18 +279,42 @@ export default async function ResultDetailPage({
       <section className="mt-6 rounded-lg border p-4">
         <h2 className="text-base font-semibold">Export</h2>
         <div className="mt-3">
-          <ExportButtons runId={String(run._id)} />
+          <ExportButtons
+            runId={String(run.id)}
+            hasOriginalFile={Boolean(resume?.originalFile)}
+            originalFilename={resume?.originalFile?.filename}
+            originalMimeType={resume?.originalFile?.mimeType}
+          />
         </div>
       </section>
 
       <section className="mt-6 rounded-lg border p-4">
         <div className="flex items-baseline justify-between gap-4">
-          <h2 className="text-base font-semibold">ATS resume text</h2>
-          <div className="text-xs text-slate-500">Preview</div>
+          <h2 className="text-base font-semibold">Resume preview</h2>
+          <div className="text-xs text-slate-500">Original vs tailored</div>
         </div>
-        <pre className="mt-3 max-h-130 overflow-auto whitespace-pre-wrap text-sm leading-6 text-slate-800">
-          {renderedText || '(No rendered text found)'}
-        </pre>
+
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <ResumeTextPreview
+            title="Original resume"
+            subtitle="Uploaded text preview"
+            text={originalResumeText}
+            removedHighlightedLines={[
+              ...overwrittenBulletLines,
+              ...overwrittenSkillLines,
+            ]}
+            emptyLabel="(No original resume text found)"
+            syncGroup="resume-preview"
+          />
+          <ResumeTextPreview
+            title="Tailored resume"
+            subtitle="Generated preview with applied rewrites"
+            text={tailoredPreviewText}
+            highlightedLines={[...rewrittenBulletLines, ...rewrittenSkillLines]}
+            emptyLabel="(No tailored resume text found)"
+            syncGroup="resume-preview"
+          />
+        </div>
       </section>
 
       <section className="mt-6 rounded-lg border p-4">
@@ -419,6 +501,40 @@ export default async function ResultDetailPage({
                     ))}
                   </div>
                 )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="mt-6 rounded-lg border p-4">
+        <h2 className="text-base font-semibold">Skills rewrites</h2>
+        {!skillsRewrite?.rewrittenSkills?.length ? (
+          <div className="mt-3 text-sm text-slate-700">
+            No skills rewrites found.
+          </div>
+        ) : (
+          <div className="mt-4 space-y-4">
+            {skillsRewrite.rewrittenSkills.map((skill, idx) => (
+              <div
+                key={`${skill.after}-${idx}`}
+                className="rounded-md border bg-slate-50 p-4"
+              >
+                <div className="text-xs text-slate-500">Skill #{idx + 1}</div>
+
+                <div className="mt-2">
+                  <DiffView
+                    before={skill.before ?? '(new skill)'}
+                    after={skill.after}
+                  />
+                </div>
+
+                <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-800">
+                  <div className="text-xs font-medium text-slate-700">
+                    Rationale
+                  </div>
+                  <div className="mt-1">{skill.rationale}</div>
+                </div>
               </div>
             ))}
           </div>

@@ -4,6 +4,7 @@ import * as React from 'react';
 import { InlineAlert } from '@/components/InlineAlert';
 import { CopyButton } from '@/components/CopyButton';
 import { useToast } from '@/components/ToastProvider';
+import { LS_JOB_ID, setStoredId } from '@/lib/clientStoredIds';
 
 type ExtractResponse =
   | { url: string; title?: string; text: string; characterCount: number }
@@ -143,11 +144,7 @@ export function JobUrlExtractor() {
 
       setSavedId(data.id);
       toast({ variant: 'success', message: 'Job saved.' });
-      try {
-        window.localStorage.setItem('resumealign:lastJobId', data.id);
-      } catch {
-        // ignore
-      }
+      setStoredId(LS_JOB_ID, data.id);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Save failed';
       setError(msg);

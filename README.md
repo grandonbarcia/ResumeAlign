@@ -65,10 +65,9 @@ This approach improves accuracy, reduces hallucinations, and mirrors real produc
 - OpenAI API (structured JSON outputs)
 - Prompt chaining with strict constraints
 
-### Auth & Data (Optional)
+### Data Storage
 
-- Convex Auth with Google/GitHub OAuth
-- Convex (storage & versioning)
+- Local JSON file storage for resumes, jobs, and tailoring runs
 
 ---
 

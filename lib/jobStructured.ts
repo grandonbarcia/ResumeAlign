@@ -1,16 +1,32 @@
 import { z } from 'zod';
 
+const optionalNonEmptyString = z.preprocess((value) => {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}, z.string().min(1).optional());
+
+const nonEmptyStringArray = z.preprocess(
+  (value) => {
+    if (!Array.isArray(value)) return value;
+    return value
+      .map((item) => (typeof item === 'string' ? item.trim() : item))
+      .filter((item) => typeof item !== 'string' || item.length > 0);
+  },
+  z.array(z.string().min(1)).default([]),
+);
+
 export const StructuredJobSchema = z
   .object({
-    title: z.string().min(1).optional(),
-    company: z.string().min(1).optional(),
-    location: z.string().min(1).optional(),
-    employmentType: z.string().min(1).optional(),
-    summary: z.string().min(1).optional(),
-    responsibilities: z.array(z.string().min(1)).default([]),
-    requirements: z.array(z.string().min(1)).default([]),
-    skills: z.array(z.string().min(1)).default([]),
-    keywords: z.array(z.string().min(1)).default([]),
+    title: optionalNonEmptyString,
+    company: optionalNonEmptyString,
+    location: optionalNonEmptyString,
+    employmentType: optionalNonEmptyString,
+    summary: optionalNonEmptyString,
+    responsibilities: nonEmptyStringArray,
+    requirements: nonEmptyStringArray,
+    skills: nonEmptyStringArray,
+    keywords: nonEmptyStringArray,
   })
   .strict();
 

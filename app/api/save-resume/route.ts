@@ -1,10 +1,5 @@
 import { NextResponse } from 'next/server';
-import { api } from '@/convex/_generated/api';
-import {
-  AuthenticationRequiredError,
-  MissingConvexUrlError,
-  createAuthenticatedServerConvexClient,
-} from '@/lib/convexServerClient';
+import { createResume } from '@/lib/localStore';
 
 export const runtime = 'nodejs';
 
@@ -14,40 +9,69 @@ type Body = {
   parsed?: unknown;
 };
 
-export async function POST(request: Request) {
-  let body: Body;
+function parseParsedField(value: FormDataEntryValue | null) {
+  if (typeof value !== 'string' || !value.trim()) {
+    return undefined;
+  }
+
   try {
-    body = (await request.json()) as Body;
+    return JSON.parse(value);
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+    throw new Error('Invalid parsed JSON');
   }
+}
 
-  if (!body?.originalText || typeof body.originalText !== 'string') {
-    return NextResponse.json(
-      { error: 'Missing originalText' },
-      { status: 400 },
-    );
-  }
-
+export async function POST(request: Request) {
   try {
-    const client = await createAuthenticatedServerConvexClient();
+    const contentType = request.headers.get('content-type') ?? '';
+    let body: Body;
+    let originalFile:
+      | {
+          buffer: Buffer;
+          filename?: string;
+          mimeType?: string;
+        }
+      | undefined;
 
-    const id = await client.mutation(api.resumes.create, {
+    if (contentType.toLowerCase().includes('multipart/form-data')) {
+      const formData = await request.formData();
+      const originalText = formData.get('originalText');
+      const filename = formData.get('filename');
+      const file = formData.get('file');
+
+      body = {
+        filename: typeof filename === 'string' ? filename : undefined,
+        originalText: typeof originalText === 'string' ? originalText : '',
+        parsed: parseParsedField(formData.get('parsed')),
+      };
+
+      if (file instanceof File) {
+        originalFile = {
+          buffer: Buffer.from(await file.arrayBuffer()),
+          filename: file.name,
+          mimeType: file.type || 'application/octet-stream',
+        };
+      }
+    } else {
+      body = (await request.json()) as Body;
+    }
+
+    if (!body?.originalText || typeof body.originalText !== 'string') {
+      return NextResponse.json(
+        { error: 'Missing originalText' },
+        { status: 400 },
+      );
+    }
+
+    const record = await createResume({
       filename: body.filename,
       originalText: body.originalText,
       parsed: body.parsed,
+      originalFile,
     });
 
-    return NextResponse.json({ id });
+    return NextResponse.json({ id: record.id });
   } catch (error) {
-    if (error instanceof MissingConvexUrlError) {
-      return NextResponse.json({ error: error.message }, { status: 501 });
-    }
-
-    if (error instanceof AuthenticationRequiredError) {
-      return NextResponse.json({ error: error.message }, { status: 401 });
-    }
-
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

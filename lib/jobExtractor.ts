@@ -8,10 +8,32 @@ const MIN_EXTRACTED_CHARS = 300;
 const DEFAULT_HEADERS: Record<string, string> = {
   // A realistic UA helps avoid simplistic bot-blocks.
   'user-agent':
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
   accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
   'accept-language': 'en-US,en;q=0.9',
+  'cache-control': 'no-cache',
+  pragma: 'no-cache',
 };
+
+const BROWSER_BLOCK_PATTERNS = [
+  'unsupported browser',
+  'browser is not supported',
+  'browser is unsupported',
+  'update your browser',
+  'outdated browser',
+  'enable javascript',
+  'requires javascript',
+  'please turn javascript on',
+  'you need to enable javascript',
+  'checking your browser',
+  'verify you are human',
+  'captcha',
+  'access denied',
+  'request blocked',
+  'automated access',
+  'security check',
+  'cloudflare',
+];
 
 function normalizeText(text: string) {
   return text
@@ -24,14 +46,11 @@ function normalizeText(text: string) {
 
 function looksLikeJavascriptGated(text: string) {
   const t = text.toLowerCase();
-  return (
-    t.includes('enable javascript') ||
-    t.includes('requires javascript') ||
-    t.includes('please turn javascript on') ||
-    t.includes('you need to enable javascript') ||
-    t.includes('checking your browser') ||
-    t.includes('cloudflare')
-  );
+  return BROWSER_BLOCK_PATTERNS.some((pattern) => t.includes(pattern));
+}
+
+function looksLikeBrowserBlockPage(title: string, text: string) {
+  return looksLikeJavascriptGated(`${title}\n${text}`);
 }
 
 function isIpV4(host: string) {
@@ -135,6 +154,33 @@ function extractJobTextFromJina(bodyText: string) {
   return { title, text };
 }
 
+async function extractJobTextViaJina(url: URL) {
+  const jinaUrl = `https://r.jina.ai/${url.toString()}`;
+  const readerRes = await fetchWithTimeout(jinaUrl, {
+    method: 'GET',
+    redirect: 'follow',
+    headers: {
+      ...DEFAULT_HEADERS,
+      accept: 'text/plain, text/markdown;q=0.9, */*;q=0.8',
+    },
+  });
+
+  if (!readerRes.ok) {
+    throw new Error(`Reader fallback failed (${readerRes.status})`);
+  }
+
+  const readerText = await readTextWithLimit(readerRes, MAX_HTML_BYTES);
+  const extracted = extractJobTextFromJina(readerText);
+
+  if (looksLikeBrowserBlockPage(extracted.title, extracted.text)) {
+    throw new Error(
+      'Reader fallback returned an anti-bot or unsupported-browser page',
+    );
+  }
+
+  return extracted;
+}
+
 export function extractJobTextFromHtml(html: string) {
   const $ = load(html);
   $('script,noscript,style,svg,canvas,iframe').remove();
@@ -158,30 +204,44 @@ export function extractJobTextFromHtml(html: string) {
 
 export async function extractJobTextFromUrl(rawUrl: string) {
   const url = assertSafeJobUrl(rawUrl);
+  let title = '';
+  let text = '';
+  let directFailure: string | null = null;
 
   // Attempt 1: direct HTML fetch.
-  const res = await fetchWithTimeout(url.toString(), {
-    method: 'GET',
-    redirect: 'follow',
-    headers: DEFAULT_HEADERS,
-  });
+  try {
+    const res = await fetchWithTimeout(url.toString(), {
+      method: 'GET',
+      redirect: 'follow',
+      headers: DEFAULT_HEADERS,
+    });
 
-  if (!res.ok) {
-    throw new Error(`Failed to fetch (${res.status})`);
+    if (!res.ok) {
+      throw new Error(`Failed to fetch (${res.status})`);
+    }
+
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.toLowerCase().includes('text/html')) {
+      throw new Error('URL did not return HTML content');
+    }
+
+    const contentLength = res.headers.get('content-length');
+    if (contentLength && Number(contentLength) > MAX_HTML_BYTES) {
+      throw new Error('Response too large');
+    }
+
+    const html = await readTextWithLimit(res, MAX_HTML_BYTES);
+    ({ title, text } = extractJobTextFromHtml(html));
+
+    if (looksLikeBrowserBlockPage(title, text)) {
+      throw new Error(
+        'Target site returned an anti-bot or unsupported-browser page',
+      );
+    }
+  } catch (error) {
+    directFailure =
+      error instanceof Error ? error.message : 'Direct fetch failed';
   }
-
-  const contentType = res.headers.get('content-type') || '';
-  if (!contentType.toLowerCase().includes('text/html')) {
-    throw new Error('URL did not return HTML content');
-  }
-
-  const contentLength = res.headers.get('content-length');
-  if (contentLength && Number(contentLength) > MAX_HTML_BYTES) {
-    throw new Error('Response too large');
-  }
-
-  const html = await readTextWithLimit(res, MAX_HTML_BYTES);
-  let { title, text } = extractJobTextFromHtml(html);
 
   const directLooksBad =
     !text ||
@@ -189,32 +249,41 @@ export async function extractJobTextFromUrl(rawUrl: string) {
     looksLikeJavascriptGated(text);
 
   // Attempt 2: fallback to reader proxy for JS-rendered / heavily scripted pages.
-  if (directLooksBad) {
-    const jinaUrl = `https://r.jina.ai/${url.toString()}`;
-    const readerRes = await fetchWithTimeout(jinaUrl, {
-      method: 'GET',
-      redirect: 'follow',
-      headers: {
-        ...DEFAULT_HEADERS,
-        accept: 'text/plain, text/markdown;q=0.9, */*;q=0.8',
-      },
-    });
+  if (directFailure || directLooksBad) {
+    try {
+      const readerExtracted = await extractJobTextViaJina(url);
 
-    if (readerRes.ok) {
-      const readerText = await readTextWithLimit(readerRes, MAX_HTML_BYTES);
-      const readerExtracted = extractJobTextFromJina(readerText);
-
-      if (readerExtracted.text && readerExtracted.text.length > text.length) {
+      if (
+        readerExtracted.text &&
+        !looksLikeBrowserBlockPage(
+          readerExtracted.title,
+          readerExtracted.text,
+        ) &&
+        readerExtracted.text.length > text.length
+      ) {
         text = readerExtracted.text;
         if (!title) title = readerExtracted.title;
       }
+    } catch (error) {
+      const readerFailure =
+        error instanceof Error ? error.message : 'Reader fallback failed';
+      directFailure = directFailure
+        ? `${directFailure}; ${readerFailure}`
+        : readerFailure;
     }
   }
 
   if (!text || text.length < MIN_EXTRACTED_CHARS) {
-    throw new Error(
-      'No job text could be extracted. This site may require JavaScript rendering, be behind a login/paywall, or block automated requests. Try a different public job-posting URL (often the company careers page works best).',
-    );
+    const hint =
+      'This site may require JavaScript rendering, be behind a login/paywall, or block automated requests. Try a public job-posting URL from the company careers page.';
+
+    if (directFailure) {
+      throw new Error(
+        `No job text could be extracted. ${directFailure}. ${hint}`,
+      );
+    }
+
+    throw new Error(`No job text could be extracted. ${hint}`);
   }
 
   return {

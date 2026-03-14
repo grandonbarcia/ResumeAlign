@@ -4,6 +4,7 @@ import * as React from 'react';
 import { InlineAlert } from '@/components/InlineAlert';
 import { CopyButton } from '@/components/CopyButton';
 import { useToast } from '@/components/ToastProvider';
+import { LS_RESUME_ID, setStoredId } from '@/lib/clientStoredIds';
 
 type ParseResponse =
   | {
@@ -135,14 +136,20 @@ export function ResumeUploader() {
     setSavedId('');
 
     try {
+      const file = lastFileRef.current;
+      const formData = new FormData();
+      formData.append('filename', filename);
+      formData.append('originalText', text);
+      if (structured !== null) {
+        formData.append('parsed', JSON.stringify(structured));
+      }
+      if (file) {
+        formData.append('file', file);
+      }
+
       const res = await fetch('/api/save-resume', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          filename,
-          originalText: text,
-          parsed: structured,
-        }),
+        body: formData,
       });
 
       const data = (await res.json()) as SaveResponse;
@@ -161,11 +168,7 @@ export function ResumeUploader() {
 
       setSavedId(data.id);
       toast({ variant: 'success', message: 'Resume saved.' });
-      try {
-        window.localStorage.setItem('resumealign:lastResumeId', data.id);
-      } catch {
-        // ignore
-      }
+      setStoredId(LS_RESUME_ID, data.id);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Save failed';
       setError(msg);

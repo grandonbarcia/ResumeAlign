@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { ConvexAuthNextjsServerProvider } from '@convex-dev/auth/nextjs/server';
 import { Geist, Geist_Mono } from 'next/font/google';
 import { ToastProvider } from '@/components/ToastProvider';
 import { Navbar } from '@/components/Navbar';
@@ -26,26 +25,18 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
-
-  const content = (
+  return (
     <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen flex flex-col`}
       >
         <ToastProvider>
-          <Navbar authEnabled={Boolean(convexUrl)} />
+          <Navbar />
           <main className="flex-1 text-foreground bg-background">
             {children}
           </main>
         </ToastProvider>
       </body>
     </html>
-  );
-
-  if (!convexUrl) return content;
-
-  return (
-    <ConvexAuthNextjsServerProvider>{content}</ConvexAuthNextjsServerProvider>
   );
 }

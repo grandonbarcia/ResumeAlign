@@ -1,12 +1,20 @@
 import { NextResponse } from 'next/server';
-import { exportResumeDocx } from '@/lib/exportResume';
-import { getTailoringRunById } from '@/lib/localStore';
+import {
+  getResumeOriginalFileById,
+  getTailoringRunById,
+} from '@/lib/localStore';
 
 export const runtime = 'nodejs';
 
 type Body = {
   runId: string;
 };
+
+function buildContentDisposition(filename: string) {
+  const fallback = filename.replace(/[^A-Za-z0-9._-]+/g, '_') || 'download';
+  const encoded = encodeURIComponent(filename);
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
 
 export async function POST(request: Request) {
   let body: Body;
@@ -27,29 +35,28 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Run not found.' }, { status: 404 });
     }
 
-    const text: string = run.tailored?.renderedText ?? '';
-    if (!text) {
+    const original = await getResumeOriginalFileById(run.resumeId);
+
+    if (!original) {
       return NextResponse.json(
-        { error: 'No renderedText found for this run.' },
-        { status: 422 },
+        {
+          error:
+            'Original uploaded file is not available for this run. Re-save the resume after this update to enable original-file download.',
+        },
+        { status: 404 },
       );
     }
 
-    const bytes = await exportResumeDocx({
-      text,
-      title: 'ResumeAlign - Tailored Resume',
-    });
-
-    const responseBody = new ArrayBuffer(bytes.byteLength);
-    new Uint8Array(responseBody).set(bytes);
+    const responseBody = new ArrayBuffer(original.buffer.byteLength);
+    new Uint8Array(responseBody).set(original.buffer);
 
     return new NextResponse(responseBody, {
       status: 200,
       headers: {
-        'content-type':
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'content-disposition':
-          'attachment; filename="resumealign-tailored.docx"',
+        'content-type': original.originalFile.mimeType,
+        'content-disposition': buildContentDisposition(
+          original.originalFile.filename,
+        ),
         'cache-control': 'no-store',
       },
     });

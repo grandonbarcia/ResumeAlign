@@ -1,12 +1,10 @@
 import { NextResponse } from 'next/server';
-import { api } from '@/convex/_generated/api';
 import { runTailorPipeline } from '@/lib/aiPipeline';
-import type { Id } from '@/convex/_generated/dataModel';
 import {
-  AuthenticationRequiredError,
-  MissingConvexUrlError,
-  createAuthenticatedServerConvexClient,
-} from '@/lib/convexServerClient';
+  createTailoringRun,
+  getJobById,
+  getResumeById,
+} from '@/lib/localStore';
 
 export const runtime = 'nodejs';
 
@@ -15,10 +13,9 @@ type Body = {
   jobId: string;
 };
 
-function isPlausibleConvexId(value: unknown) {
+function isPlausibleStoredId(value: unknown) {
   if (typeof value !== 'string') return false;
   const v = value.trim();
-  // Keep permissive: Convex ids are opaque and may not be strictly alphanumeric.
   if (v.length < 5) return false;
   if (v.length > 256) return false;
   if (/\s/.test(v)) return false;
@@ -40,7 +37,7 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!isPlausibleConvexId(body.resumeId) || !isPlausibleConvexId(body.jobId)) {
+  if (!isPlausibleStoredId(body.resumeId) || !isPlausibleStoredId(body.jobId)) {
     return NextResponse.json(
       {
         error:
@@ -51,26 +48,14 @@ export async function POST(request: Request) {
   }
 
   try {
-    const client = await createAuthenticatedServerConvexClient();
-
-    const resume = await client.query(api.resumes.getMineById, {
-      id: body.resumeId as Id<'resumes'>,
-    });
+    const resume = await getResumeById(body.resumeId.trim());
     if (!resume) {
-      return NextResponse.json(
-        { error: 'Resume not found for this user.' },
-        { status: 404 },
-      );
+      return NextResponse.json({ error: 'Resume not found.' }, { status: 404 });
     }
 
-    const job = await client.query(api.jobs.getMineById, {
-      id: body.jobId as Id<'jobs'>,
-    });
+    const job = await getJobById(body.jobId.trim());
     if (!job) {
-      return NextResponse.json(
-        { error: 'Job not found for this user.' },
-        { status: 404 },
-      );
+      return NextResponse.json({ error: 'Job not found.' }, { status: 404 });
     }
 
     const result = await runTailorPipeline({
@@ -86,9 +71,9 @@ export async function POST(request: Request) {
       },
     });
 
-    const runId = await client.mutation(api.tailoringRuns.create, {
-      resumeId: resume._id,
-      jobId: job._id,
+    const run = await createTailoringRun({
+      resumeId: resume.id,
+      jobId: job.id,
       tailored: result,
       explanations: {
         bulletRewrite: result.bulletRewrite,
@@ -97,7 +82,7 @@ export async function POST(request: Request) {
       },
     });
 
-    if (!runId) {
+    if (!run.id) {
       return NextResponse.json(
         {
           error:
@@ -107,28 +92,9 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ runId: String(runId) });
+    return NextResponse.json({ runId: run.id });
   } catch (error) {
-    if (error instanceof MissingConvexUrlError) {
-      return NextResponse.json({ error: error.message }, { status: 501 });
-    }
-
-    if (error instanceof AuthenticationRequiredError) {
-      return NextResponse.json({ error: error.message }, { status: 401 });
-    }
-
     const message = error instanceof Error ? error.message : 'Unknown error';
-
-    // Convex throws ArgumentValidationError if ids are malformed; surface a clean 400.
-    if (message.includes('ArgumentValidationError')) {
-      return NextResponse.json(
-        {
-          error:
-            'Invalid resumeId or jobId. Please paste ids created by the Save steps (or pick them from the dashboard).',
-        },
-        { status: 400 },
-      );
-    }
 
     return NextResponse.json({ error: message }, { status: 500 });
   }

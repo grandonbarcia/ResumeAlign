@@ -1,12 +1,6 @@
 import { NextResponse } from 'next/server';
-import { api } from '@/convex/_generated/api';
 import { exportResumePdf } from '@/lib/exportResume';
-import type { Id } from '@/convex/_generated/dataModel';
-import {
-  AuthenticationRequiredError,
-  MissingConvexUrlError,
-  createAuthenticatedServerConvexClient,
-} from '@/lib/convexServerClient';
+import { getTailoringRunById } from '@/lib/localStore';
 
 export const runtime = 'nodejs';
 
@@ -27,11 +21,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const client = await createAuthenticatedServerConvexClient();
-
-    const run = await client.query(api.tailoringRuns.getMineById, {
-      id: body.runId.trim() as Id<'tailoringRuns'>,
-    });
+    const run = await getTailoringRunById(body.runId.trim());
 
     if (!run) {
       return NextResponse.json({ error: 'Run not found.' }, { status: 404 });
@@ -63,14 +53,6 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    if (error instanceof MissingConvexUrlError) {
-      return NextResponse.json({ error: error.message }, { status: 501 });
-    }
-
-    if (error instanceof AuthenticationRequiredError) {
-      return NextResponse.json({ error: error.message }, { status: 401 });
-    }
-
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

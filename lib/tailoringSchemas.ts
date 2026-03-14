@@ -55,6 +55,25 @@ export const SkillsOptimizeSchema = z
 
 export type SkillsOptimize = z.infer<typeof SkillsOptimizeSchema>;
 
+export const SkillsRewriteSchema = z
+  .object({
+    rewrittenSkills: z
+      .array(
+        z
+          .object({
+            before: z.string().min(1).optional(),
+            after: z.string().min(1),
+            rationale: z.string().min(1),
+          })
+          .strict(),
+      )
+      .default([]),
+    notes: z.string().min(1).optional(),
+  })
+  .strict();
+
+export type SkillsRewrite = z.infer<typeof SkillsRewriteSchema>;
+
 export const TailoredResumeSchema = z
   .object({
     basics: z
@@ -123,6 +142,7 @@ export const TailoringResultSchema = z
     gapAnalysis: GapAnalysisSchema,
     bulletRewrite: BulletRewriteSchema,
     skillsOptimize: SkillsOptimizeSchema,
+    skillsRewrite: SkillsRewriteSchema.default({ rewrittenSkills: [] }),
   })
   .strict();
 

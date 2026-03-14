@@ -4,16 +4,17 @@ import * as React from 'react';
 import { InlineAlert } from '@/components/InlineAlert';
 import { CopyButton } from '@/components/CopyButton';
 import { useToast } from '@/components/ToastProvider';
+import {
+  getStoredId,
+  LS_JOB_ID,
+  LS_RESUME_ID,
+  subscribeToStoredIdsUpdated,
+} from '@/lib/clientStoredIds';
 
 type TailorResponse = { runId: string } | { error: string };
 
-const LS_RESUME_ID = 'resumealign:lastResumeId';
-const LS_JOB_ID = 'resumealign:lastJobId';
-
-function isPlausibleConvexId(value: string) {
+function isPlausibleStoredId(value: string) {
   const v = value.trim();
-  // Convex ids are opaque strings; keep this permissive to avoid false rejects.
-  // We mainly want to block empty/whitespace and obvious placeholders.
   if (v.length < 5) return false;
   if (v.length > 256) return false;
   if (/\s/.test(v)) return false;
@@ -46,15 +47,19 @@ export function TailorRunner() {
   }
 
   React.useEffect(() => {
-    try {
-      const r = window.localStorage.getItem(LS_RESUME_ID) ?? '';
-      const j = window.localStorage.getItem(LS_JOB_ID) ?? '';
-      if (r && !resumeId && isPlausibleConvexId(r)) setResumeId(r);
-      if (j && !jobId && isPlausibleConvexId(j)) setJobId(j);
-    } catch {
-      // ignore
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const syncFromStorage = () => {
+      const r = getStoredId(LS_RESUME_ID);
+      const j = getStoredId(LS_JOB_ID);
+      if (isPlausibleStoredId(r)) {
+        setResumeId((current) => (current === r ? current : r));
+      }
+      if (isPlausibleStoredId(j)) {
+        setJobId((current) => (current === j ? current : j));
+      }
+    };
+
+    syncFromStorage();
+    return subscribeToStoredIdsUpdated(syncFromStorage);
   }, []);
 
   async function run() {
@@ -66,7 +71,7 @@ export function TailorRunner() {
     const trimmedResumeId = resumeId.trim();
     const trimmedJobId = jobId.trim();
 
-    if (!isPlausibleConvexId(trimmedResumeId)) {
+    if (!isPlausibleStoredId(trimmedResumeId)) {
       const msg =
         'Resume id looks invalid. Upload + Save a resume first (Step 1), then paste the saved id here.';
       setError(msg);
@@ -75,7 +80,7 @@ export function TailorRunner() {
       return;
     }
 
-    if (!isPlausibleConvexId(trimmedJobId)) {
+    if (!isPlausibleStoredId(trimmedJobId)) {
       const msg =
         'Job id looks invalid. Extract + Save a job first (Step 2), then paste the saved id here.';
       setError(msg);
@@ -96,7 +101,14 @@ export function TailorRunner() {
 
       const data = (await res.json()) as TailorResponse;
       if (!res.ok) {
-        const msg = 'error' in data ? data.error : 'Failed to run tailoring';
+        let msg = 'error' in data ? data.error : 'Failed to run tailoring';
+        if (msg === 'Resume not found.') {
+          msg =
+            'Resume not found. Save the resume again in Step 1 so Step 3 refreshes to the latest saved id, then retry.';
+        } else if (msg === 'Job not found.') {
+          msg =
+            'Job not found. Save the job again in Step 2 so Step 3 refreshes to the latest saved id, then retry.';
+        }
         setError(msg);
         toast({ variant: 'error', message: msg });
         return;

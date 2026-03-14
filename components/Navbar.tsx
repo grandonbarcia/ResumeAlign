@@ -1,10 +1,6 @@
 'use client';
 
-import * as React from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useAuthActions } from '@convex-dev/auth/react';
-import { useConvexAuth } from 'convex/react';
 import { Button } from './ui/button';
 
 function NavbarShell({ children }: { children: React.ReactNode }) {
@@ -36,62 +32,12 @@ function NavbarShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function NavbarWithAuth() {
-  const router = useRouter();
-  const { signOut } = useAuthActions();
-  const { isAuthenticated, isLoading } = useConvexAuth();
-  const [isSigningOut, setIsSigningOut] = React.useState(false);
-
-  async function handleSignOut() {
-    setIsSigningOut(true);
-    try {
-      await signOut();
-      router.push('/');
-      router.refresh();
-    } finally {
-      setIsSigningOut(false);
-    }
-  }
-
+export function Navbar() {
   return (
     <NavbarShell>
-      {!isLoading && isAuthenticated ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => void handleSignOut()}
-          disabled={isSigningOut}
-        >
-          {isSigningOut ? 'Signing out…' : 'Sign Out'}
-        </Button>
-      ) : (
-        <>
-          <Button asChild variant="outline" size="sm">
-            <Link href="/sign-in">Sign In</Link>
-          </Button>
-          <Button asChild size="sm">
-            <Link href="/sign-up">Get Started</Link>
-          </Button>
-        </>
-      )}
-    </NavbarShell>
-  );
-}
-
-function NavbarWithoutAuth() {
-  return (
-    <NavbarShell>
-      <Button asChild variant="outline" size="sm">
-        <Link href="/sign-in">Sign In</Link>
-      </Button>
       <Button asChild size="sm">
-        <Link href="/sign-up">Get Started</Link>
+        <Link href="/upload">Start Tailoring</Link>
       </Button>
     </NavbarShell>
   );
-}
-
-export function Navbar({ authEnabled = true }: { authEnabled?: boolean }) {
-  return authEnabled ? <NavbarWithAuth /> : <NavbarWithoutAuth />;
 }
