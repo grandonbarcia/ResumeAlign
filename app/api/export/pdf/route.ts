@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
-import { exportResumePdf } from '@/lib/exportResume';
+import {
+  exportResumePdf,
+  getTailoredResumeExportPayload,
+} from '@/lib/exportResume';
 import { getTailoringRunById } from '@/lib/localStore';
 
 export const runtime = 'nodejs';
@@ -27,8 +30,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Run not found.' }, { status: 404 });
     }
 
-    const text: string = run.tailored?.renderedText ?? '';
-    if (!text) {
+    const payload = getTailoredResumeExportPayload(run.tailored);
+    if (!payload.text) {
       return NextResponse.json(
         { error: 'No renderedText found for this run.' },
         { status: 422 },
@@ -36,8 +39,8 @@ export async function POST(request: Request) {
     }
 
     const bytes = await exportResumePdf({
-      text,
-      title: 'ResumeAlign - Tailored Resume',
+      text: payload.text,
+      title: payload.title,
     });
 
     const responseBody = new ArrayBuffer(bytes.byteLength);

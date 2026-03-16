@@ -1,5 +1,17 @@
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx';
+import type { TailoringResult } from '@/lib/tailoringSchemas';
+
+export const TAILORED_RESUME_EXPORT_TITLE = 'ResumeAlign - Tailored Resume';
+
+export function getTailoredResumeExportPayload(
+  tailored: Pick<TailoringResult, 'renderedText'> | null | undefined,
+) {
+  return {
+    title: TAILORED_RESUME_EXPORT_TITLE,
+    text: tailored?.renderedText ?? '',
+  };
+}
 
 export async function exportResumePdf(args: {
   text: string;

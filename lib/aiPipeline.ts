@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { StructuredJobSchema, type StructuredJob } from '@/lib/jobStructured';
 import {
   StructuredResumeSchema,
@@ -17,6 +18,7 @@ import { createOpenAIClient, getOpenAIModel } from '@/lib/openaiClient';
 import { chatJson } from '@/lib/jsonModel';
 import { gapAnalysisPrompt } from '@/prompts/gapAnalysis';
 import { bulletRewritePrompt } from '@/prompts/bulletRewrite';
+import { jobSkillsPrompt } from '@/prompts/jobSkills';
 import { skillsOptimizePrompt } from '@/prompts/skillsOptimize';
 import { structureResumePrompt } from '@/prompts/structureResume';
 import { structureJobPrompt } from '@/prompts/structureJob';
@@ -42,6 +44,12 @@ export type TailorPipelineInput = {
   };
 };
 
+const JobDescriptionSkillsSchema = z
+  .object({
+    skills: z.array(z.string().min(1)).default([]),
+  })
+  .strict();
+
 function safeJsonStringify(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
@@ -61,6 +69,12 @@ function uniqueByKey(values: string[]) {
     out.push(v);
   }
   return out;
+}
+
+function sanitizeSkills(values: string[]) {
+  return uniqueByKey(
+    values.map((value) => value.trim().replace(/\s+/g, ' ')).filter(Boolean),
+  );
 }
 
 function buildSkillCanonicalMap(skills: string[]) {
@@ -198,6 +212,43 @@ function buildJobEvidenceText(job: StructuredJob, gap: GapAnalysis): string {
   ]
     .filter((value): value is string => Boolean(value && value.trim()))
     .join('\n');
+}
+
+async function generateJobDescriptionSkills(args: {
+  rawJobText: string;
+  structuredJob: StructuredJob;
+  client: ReturnType<typeof createOpenAIClient>;
+  model: string | null;
+}) {
+  const fallback = sanitizeSkills([
+    ...(args.structuredJob.skills ?? []),
+    ...(args.structuredJob.keywords ?? []),
+    ...extractKeywords(args.rawJobText),
+    ...extractTechLikeTokens(args.rawJobText),
+  ]).slice(0, 15);
+
+  if (!args.client || !args.model) {
+    return fallback;
+  }
+
+  const prompt = jobSkillsPrompt({
+    jobDescriptionText: args.rawJobText,
+    structuredJob: args.structuredJob,
+  });
+
+  try {
+    const result = await chatJson({
+      client: args.client,
+      model: args.model,
+      system: prompt.system,
+      user: prompt.user,
+      schema: JobDescriptionSkillsSchema,
+    });
+
+    return sanitizeSkills(result.skills).slice(0, 15);
+  } catch {
+    return fallback;
+  }
 }
 
 function suggestGroundedJobSkillAdditions(args: {
@@ -622,6 +673,12 @@ export async function runTailorPipeline(
 
   const structuredResumeJson = safeJsonStringify(structuredResume);
   const structuredJobJson = safeJsonStringify(structuredJob);
+  const jobDescriptionSkills = await generateJobDescriptionSkills({
+    rawJobText: input.job.rawText,
+    structuredJob,
+    client,
+    model,
+  });
 
   const gapAnalysis = useMock
     ? mockGapAnalysis({ resume: structuredResume, job: structuredJob })
@@ -757,6 +814,7 @@ export async function runTailorPipeline(
   });
 
   const enrichedPrimary = uniqueByKey([
+    ...jobDescriptionSkills,
     ...jobAlignedAdditions,
     ...prioritizedPrimary,
   ]).slice(0, 12);
@@ -767,6 +825,9 @@ export async function runTailorPipeline(
     secondary,
     other,
     rationale: uniqueByKey([
+      jobDescriptionSkills.length
+        ? `Generated a fresh skills list from the submitted job description: ${jobDescriptionSkills.slice(0, 6).join(', ')}.`
+        : '',
       ...jobAlignedAdditions.map(
         (skill) =>
           `Added ${skill} because it is relevant to the job description and supported by the resume evidence.`,

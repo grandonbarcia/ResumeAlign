@@ -1,11 +1,15 @@
 import Link from 'next/link';
 import { CopyButton } from '@/components/CopyButton';
 import { DiffView } from '@/components/DiffView';
+import { ExportResumePreview } from '@/components/ExportResumePreview';
 import { ExportButtons } from '@/components/ExportButtons';
 import { InlineAlert } from '@/components/InlineAlert';
 import { MockModeBanner } from '@/components/MockModeBanner';
 import { ResumeTextPreview } from '@/components/ResumeTextPreview';
+import { getTailoredResumeExportPayload } from '@/lib/exportResume';
 import { getResumeById, getTailoringRunById } from '@/lib/localStore';
+import { renderATSResumeText } from '@/lib/renderResume';
+import { StructuredResumeSchema } from '@/lib/resumeStructured';
 import {
   TailoringResultSchema,
   type TailoringResult,
@@ -19,6 +23,10 @@ function escapeRegExp(value: string) {
 
 function buildFlexibleWhitespacePattern(value: string) {
   return escapeRegExp(value.trim()).replace(/\s+/g, '\\s+');
+}
+
+function normalizeSkillValue(value: string) {
+  return value.trim().toLowerCase();
 }
 
 function applyBulletRewritesToPreviewText(args: {
@@ -51,22 +59,26 @@ function applyBulletRewritesToPreviewText(args: {
 
 function applySkillsRewriteToPreviewText(args: {
   text: string;
+  finalSkills?: string[];
   skillsRewrite: TailoringResult['skillsRewrite'] | null | undefined;
 }) {
   if (!args.text.trim()) return '';
 
   const finalSkills =
+    args.finalSkills?.map((skill) => skill.trim()).filter(Boolean) ??
     args.skillsRewrite?.rewrittenSkills
       .map((skill) => skill.after.trim())
-      .filter(Boolean) ?? [];
+      .filter(Boolean) ??
+    [];
+
+  const skillsSectionRegex =
+    /(\bSKILLS\b\s*)([\s\S]*?)(?=\b(?:WORK EXPERIENCE|EXPERIENCE|EDUCATION|PROJECTS|CERTIFICATIONS|ACHIEVEMENTS|SUMMARY)\b|$)/i;
 
   if (!finalSkills.length) {
-    return args.text;
+    return args.text.replace(skillsSectionRegex, '').trim();
   }
 
   const nextSkillsBlock = finalSkills.join(' • ');
-  const skillsSectionRegex =
-    /(\bSKILLS\b\s*)([\s\S]*?)(?=\b(?:WORK EXPERIENCE|EXPERIENCE|EDUCATION|PROJECTS|CERTIFICATIONS|ACHIEVEMENTS|SUMMARY)\b|$)/i;
 
   if (skillsSectionRegex.test(args.text)) {
     return args.text.replace(
@@ -163,8 +175,23 @@ export default async function ResultDetailPage({
     tailored = null;
   }
 
-  const renderedText: string = tailored?.renderedText ?? '';
+  const tailoredPdfExport = getTailoredResumeExportPayload(tailored);
+  const pdfPreviewTitle = 'ResumeAlign - Resume';
+
+  const renderedText: string = tailoredPdfExport.text;
   const originalResumeText: string = resume?.originalText ?? '';
+  const originalStructuredResume = (() => {
+    try {
+      return resume?.parsed
+        ? StructuredResumeSchema.parse(resume.parsed)
+        : null;
+    } catch {
+      return null;
+    }
+  })();
+  const originalPdfPreviewText = originalStructuredResume
+    ? renderATSResumeText(originalStructuredResume)
+    : originalResumeText;
   const gapAnalysis = tailored?.gapAnalysis;
   const skillsOptimize = tailored?.skillsOptimize;
   const skillsRewrite = tailored?.skillsRewrite;
@@ -183,24 +210,37 @@ export default async function ResultDetailPage({
     ? optimizedSkillsRaw
     : [];
 
-  const originalSet = new Set(originalSkills ?? []);
-  const optimizedSet = new Set(optimizedSkills);
+  const originalSkillKeys = new Set(
+    (originalSkills ?? []).map(normalizeSkillValue),
+  );
+  const filteredOptimizedSkills = optimizedSkills.filter(
+    (skill) => !originalSkillKeys.has(normalizeSkillValue(skill)),
+  );
 
-  const addedSkills = optimizedSkills.filter((s) => !originalSet.has(s));
+  const optimizedSet = new Set(
+    filteredOptimizedSkills.map(normalizeSkillValue),
+  );
+
+  const addedSkills = filteredOptimizedSkills;
   const removedSkills = (originalSkills ?? []).filter(
-    (s) => !optimizedSet.has(s),
+    (s) => !optimizedSet.has(normalizeSkillValue(s)),
   );
 
   const originalIndex = new Map<string, number>();
-  (originalSkills ?? []).forEach((s, idx) => originalIndex.set(s, idx));
+  (originalSkills ?? []).forEach((s, idx) =>
+    originalIndex.set(normalizeSkillValue(s), idx),
+  );
   const optimizedIndex = new Map<string, number>();
-  optimizedSkills.forEach((s, idx) => optimizedIndex.set(s, idx));
+  filteredOptimizedSkills.forEach((s, idx) =>
+    optimizedIndex.set(normalizeSkillValue(s), idx),
+  );
 
-  const movedUp = optimizedSkills
-    .filter((s) => originalIndex.has(s))
+  const movedUp = filteredOptimizedSkills
+    .filter((s) => originalIndex.has(normalizeSkillValue(s)))
     .map((s) => {
-      const from = originalIndex.get(s)!;
-      const to = optimizedIndex.get(s)!;
+      const key = normalizeSkillValue(s);
+      const from = originalIndex.get(key)!;
+      const to = optimizedIndex.get(key)!;
       return { s, delta: from - to };
     })
     .filter((x) => x.delta >= 3)
@@ -208,11 +248,12 @@ export default async function ResultDetailPage({
     .slice(0, 12)
     .map((x) => x.s);
 
-  const movedDown = optimizedSkills
-    .filter((s) => originalIndex.has(s))
+  const movedDown = filteredOptimizedSkills
+    .filter((s) => originalIndex.has(normalizeSkillValue(s)))
     .map((s) => {
-      const from = originalIndex.get(s)!;
-      const to = optimizedIndex.get(s)!;
+      const key = normalizeSkillValue(s);
+      const from = originalIndex.get(key)!;
+      const to = optimizedIndex.get(key)!;
       return { s, delta: to - from };
     })
     .filter((x) => x.delta >= 3)
@@ -244,6 +285,13 @@ export default async function ResultDetailPage({
 
   const tailoredPreviewText = applySkillsRewriteToPreviewText({
     text: bulletRewrittenPreviewText,
+    finalSkills: filteredOptimizedSkills,
+    skillsRewrite,
+  });
+
+  const tailoredPdfPreviewText = applySkillsRewriteToPreviewText({
+    text: tailoredPdfExport.text,
+    finalSkills: filteredOptimizedSkills,
     skillsRewrite,
   });
 
@@ -284,6 +332,28 @@ export default async function ResultDetailPage({
             hasOriginalFile={Boolean(resume?.originalFile)}
             originalFilename={resume?.originalFile?.filename}
             originalMimeType={resume?.originalFile?.mimeType}
+          />
+        </div>
+      </section>
+
+      <section className="mt-6 rounded-lg border p-4">
+        <div className="flex items-baseline justify-between gap-4">
+          <h2 className="text-base font-semibold">Export preview</h2>
+          <div className="text-xs text-slate-500">
+            Shows the original and tailored resumes in the PDF export layout
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+          <ExportResumePreview
+            label="Original resume PDF"
+            title={pdfPreviewTitle}
+            text={originalPdfPreviewText}
+          />
+          <ExportResumePreview
+            label="Tailored resume PDF"
+            title={pdfPreviewTitle}
+            text={tailoredPdfPreviewText}
           />
         </div>
       </section>
@@ -354,8 +424,8 @@ export default async function ResultDetailPage({
                 Optimized skills
               </div>
               <div className="mt-2 flex flex-wrap gap-2">
-                {optimizedSkills.length ? (
-                  optimizedSkills.map((s) => (
+                {filteredOptimizedSkills.length ? (
+                  filteredOptimizedSkills.map((s) => (
                     <span
                       key={s}
                       className={
