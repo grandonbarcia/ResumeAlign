@@ -17,44 +17,8 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function buildFlexibleWhitespacePattern(value: string) {
-  return escapeRegExp(value.trim()).replace(/\s+/g, '\\s+');
-}
-
 function normalizeSkillValue(value: string) {
   return value.trim().toLowerCase();
-}
-
-function applyBulletRewritesToPreviewText(args: {
-  originalText: string;
-  renderedText: string;
-  bulletRewrite: TailoringResult['bulletRewrite'] | null | undefined;
-}) {
-  const sourceText = args.originalText.trim() || args.renderedText.trim();
-  if (!sourceText) return '';
-  if (!args.bulletRewrite?.experience?.length) return sourceText;
-
-  let nextText = sourceText;
-
-  for (const experience of args.bulletRewrite.experience) {
-    for (const bullet of experience.rewrittenBullets) {
-      const before = bullet.before.trim();
-      const after = bullet.after.trim();
-      if (!before || !after) continue;
-
-      const pattern = buildFlexibleWhitespacePattern(before);
-      const regex = new RegExp(pattern);
-      if (regex.test(nextText)) {
-        nextText = nextText.replace(regex, after);
-      }
-    }
-  }
-
-  return nextText;
 }
 
 function applySkillsRewriteToPreviewText(args: {
@@ -83,11 +47,53 @@ function applySkillsRewriteToPreviewText(args: {
   if (skillsSectionRegex.test(args.text)) {
     return args.text.replace(
       skillsSectionRegex,
-      (_, heading: string) => `${heading}${nextSkillsBlock} `,
+      (_, heading: string) => `${heading}${nextSkillsBlock}\n\n`,
     );
   }
 
-  return `SKILLS ${nextSkillsBlock}\n\n${args.text}`;
+  return `SKILLS\n${nextSkillsBlock}\n\n${args.text}`;
+}
+
+function buildOriginalPreviewFromTailored(args: {
+  tailored: TailoringResult | null;
+  originalSkills: string[] | null;
+}) {
+  const tailoredResume = args.tailored?.tailored;
+  if (!tailoredResume) return null;
+
+  const bulletRewriteByRole = new Map(
+    (args.tailored?.bulletRewrite?.experience ?? []).map((experience) => [
+      `${experience.company}::${experience.title}`,
+      experience,
+    ]),
+  );
+
+  return {
+    ...tailoredResume,
+    summary: undefined,
+    skills: args.originalSkills ?? tailoredResume.skills,
+    experience: tailoredResume.experience.map((experience) => {
+      const rewrittenExperience = bulletRewriteByRole.get(
+        `${experience.company}::${experience.title}`,
+      );
+
+      if (!rewrittenExperience) {
+        return experience;
+      }
+
+      const originalBullets = [...experience.bullets];
+      for (const rewrittenBullet of rewrittenExperience.rewrittenBullets) {
+        if (rewrittenBullet.index < 0) continue;
+        if (rewrittenBullet.index >= originalBullets.length) continue;
+        originalBullets[rewrittenBullet.index] = rewrittenBullet.before;
+      }
+
+      return {
+        ...experience,
+        bullets: originalBullets,
+      };
+    }),
+  };
 }
 
 function isPlausibleStoredId(value: unknown) {
@@ -178,24 +184,7 @@ export default async function ResultDetailPage({
   const tailoredPdfExport = getTailoredResumeExportPayload(tailored);
   const pdfPreviewTitle = 'ResumeAlign - Resume';
 
-  const renderedText: string = tailoredPdfExport.text;
   const originalResumeText: string = resume?.originalText ?? '';
-  const originalStructuredResume = (() => {
-    try {
-      return resume?.parsed
-        ? StructuredResumeSchema.parse(resume.parsed)
-        : null;
-    } catch {
-      return null;
-    }
-  })();
-  const originalPdfPreviewText = originalStructuredResume
-    ? renderATSResumeText(originalStructuredResume)
-    : originalResumeText;
-  const gapAnalysis = tailored?.gapAnalysis;
-  const skillsOptimize = tailored?.skillsOptimize;
-  const skillsRewrite = tailored?.skillsRewrite;
-  const bulletRewrite = tailored?.bulletRewrite;
   const originalSkillsRaw = tailored?.originalSkills;
   const optimizedSkillsRaw = tailored?.tailored?.skills;
 
@@ -206,6 +195,35 @@ export default async function ResultDetailPage({
   const originalSkills = isStringArray(originalSkillsRaw)
     ? originalSkillsRaw
     : null;
+  const originalStructuredResume = (() => {
+    try {
+      return resume?.parsed
+        ? StructuredResumeSchema.parse(resume.parsed)
+        : null;
+    } catch {
+      return null;
+    }
+  })();
+  const originalFallbackStructuredResume = buildOriginalPreviewFromTailored({
+    tailored,
+    originalSkills,
+  });
+  const originalPdfSourceText = originalStructuredResume
+    ? renderATSResumeText(originalStructuredResume)
+    : originalFallbackStructuredResume
+      ? renderATSResumeText(originalFallbackStructuredResume)
+      : originalResumeText;
+  const gapAnalysis = tailored?.gapAnalysis;
+  const skillsOptimize = tailored?.skillsOptimize;
+  const skillsRewrite = tailored?.skillsRewrite;
+  const bulletRewrite = tailored?.bulletRewrite;
+  const originalPdfSkills = originalSkills?.length
+    ? originalSkills
+    : originalStructuredResume?.skills.length
+      ? originalStructuredResume.skills
+      : originalFallbackStructuredResume?.skills.length
+        ? originalFallbackStructuredResume.skills
+        : null;
   const optimizedSkills = isStringArray(optimizedSkillsRaw)
     ? optimizedSkillsRaw
     : [];
@@ -277,23 +295,17 @@ export default async function ResultDetailPage({
       .map((skill) => skill.before)
       .filter((skill): skill is string => Boolean(skill)) ?? [];
 
-  const bulletRewrittenPreviewText = applyBulletRewritesToPreviewText({
-    originalText: originalResumeText,
-    renderedText,
-    bulletRewrite,
-  });
+  const tailoredPreviewText = tailoredPdfExport.text;
 
-  const tailoredPreviewText = applySkillsRewriteToPreviewText({
-    text: bulletRewrittenPreviewText,
-    finalSkills: filteredOptimizedSkills,
-    skillsRewrite,
-  });
+  const tailoredPdfPreviewText = tailoredPdfExport.text;
 
-  const tailoredPdfPreviewText = applySkillsRewriteToPreviewText({
-    text: tailoredPdfExport.text,
-    finalSkills: filteredOptimizedSkills,
-    skillsRewrite,
-  });
+  const originalPdfPreviewText = originalPdfSkills
+    ? applySkillsRewriteToPreviewText({
+        text: originalPdfSourceText,
+        finalSkills: originalPdfSkills,
+        skillsRewrite: null,
+      })
+    : originalPdfSourceText;
 
   return (
     <main className="mx-auto max-w-7xl p-4 sm:p-6">

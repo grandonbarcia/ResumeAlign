@@ -40,7 +40,7 @@ export default async function DashboardPage() {
         Showing up to 20 most recent items.
       </p>
 
-      <InlineAlert variant="default" className="mb-6">
+      <InlineAlert variant="info" className="mb-6">
         Data is stored locally in this app instance. It is no longer tied to
         user accounts.
       </InlineAlert>

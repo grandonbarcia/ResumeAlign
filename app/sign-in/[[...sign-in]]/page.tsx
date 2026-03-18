@@ -6,7 +6,7 @@ export default function Page() {
   return (
     <main className="flex min-h-screen items-center justify-center p-6">
       <div className="w-full max-w-md space-y-4">
-        <InlineAlert variant="default" title="Authentication removed">
+        <InlineAlert variant="info" title="Authentication removed">
           ResumeAlign no longer uses sign-in. Local app data is available
           without an account.
         </InlineAlert>

@@ -19,6 +19,7 @@ import { chatJson } from '@/lib/jsonModel';
 import { gapAnalysisPrompt } from '@/prompts/gapAnalysis';
 import { bulletRewritePrompt } from '@/prompts/bulletRewrite';
 import { jobSkillsPrompt } from '@/prompts/jobSkills';
+import { experienceAlignedSkillsPrompt } from '@/prompts/experienceAlignedSkills';
 import { skillsOptimizePrompt } from '@/prompts/skillsOptimize';
 import { structureResumePrompt } from '@/prompts/structureResume';
 import { structureJobPrompt } from '@/prompts/structureJob';
@@ -47,6 +48,14 @@ export type TailorPipelineInput = {
 const JobDescriptionSkillsSchema = z
   .object({
     skills: z.array(z.string().min(1)).default([]),
+  })
+  .strict();
+
+const ExperienceAlignedSkillsSchema = z
+  .object({
+    skills: z.array(z.string().min(1)).default([]),
+    rationale: z.array(z.string().min(1)).default([]),
+    notes: z.string().min(1).optional(),
   })
   .strict();
 
@@ -251,6 +260,69 @@ async function generateJobDescriptionSkills(args: {
   }
 }
 
+async function generateExperienceAlignedSkills(args: {
+  rawJobText: string;
+  resume: StructuredResume;
+  structuredJob: StructuredJob;
+  gap: GapAnalysis;
+  client: ReturnType<typeof createOpenAIClient>;
+  model: string | null;
+}) {
+  const fallbackSkills = suggestGroundedJobSkillAdditions({
+    resume: args.resume,
+    job: args.structuredJob,
+    gap: args.gap,
+    existingSkills: args.resume.skills ?? [],
+    limit: 10,
+  });
+
+  const fallbackRationale = fallbackSkills.map(
+    (skill) =>
+      `${skill} overlaps between the submitted job description and the candidate's prior work experience.`,
+  );
+
+  if (!args.client || !args.model) {
+    return {
+      skills: fallbackSkills,
+      rationale: fallbackRationale,
+    };
+  }
+
+  const resumeEvidenceText = buildResumeEvidenceText(args.resume);
+  const prompt = experienceAlignedSkillsPrompt({
+    jobDescriptionText: args.rawJobText,
+    structuredJob: args.structuredJob,
+    structuredResume: args.resume,
+    gapAnalysisJson: safeJsonStringify(args.gap),
+    resumeEvidenceText,
+  });
+
+  try {
+    const result = await chatJson({
+      client: args.client,
+      model: args.model,
+      system: prompt.system,
+      user: prompt.user,
+      schema: ExperienceAlignedSkillsSchema,
+    });
+
+    return {
+      skills: filterToGroundedSkills({
+        skills: sanitizeSkills(result.skills),
+        resume: args.resume,
+        job: args.structuredJob,
+        gap: args.gap,
+      }).slice(0, 10),
+      rationale: uniqueByKey(result.rationale ?? []).slice(0, 8),
+    };
+  } catch {
+    return {
+      skills: fallbackSkills,
+      rationale: fallbackRationale,
+    };
+  }
+}
+
 function suggestGroundedJobSkillAdditions(args: {
   resume: StructuredResume;
   job: StructuredJob;
@@ -292,27 +364,24 @@ function buildSkillsRewrite(args: {
   finalSkills: string[];
   rationale: string[];
 }) {
-  const rewrittenSkills = args.finalSkills
-    .map((after, index) => {
-      const before = args.originalSkills[index];
-      if (before && normalizeKey(before) === normalizeKey(after)) {
-        return null;
-      }
+  const rewrittenSkills = args.finalSkills.flatMap((after, index) => {
+    const before = args.originalSkills[index];
+    if (before && normalizeKey(before) === normalizeKey(after)) {
+      return [];
+    }
 
-      const rationale = before
-        ? 'Replaced with a skill better aligned to the job description and supported by resume evidence.'
-        : "Added because it matches the job description and is supported by the candidate's resume evidence.";
+    const rationale = before
+      ? 'Replaced with a skill better aligned to the job description and supported by resume evidence.'
+      : "Added because it matches the job description and is supported by the candidate's resume evidence.";
 
-      return {
+    return [
+      {
         before,
         after,
         rationale: args.rationale[0] || rationale,
-      };
-    })
-    .filter(
-      (item): item is { before?: string; after: string; rationale: string } =>
-        Boolean(item),
-    );
+      },
+    ];
+  });
 
   return SkillsRewriteSchema.parse({
     rewrittenSkills,
@@ -749,6 +818,14 @@ export async function runTailorPipeline(
 
   const originalSkills = [...rewrittenResume.skills];
   const resumeEvidenceText = buildResumeEvidenceText(rewrittenResume);
+  const experienceAlignedSkills = await generateExperienceAlignedSkills({
+    rawJobText: input.job.rawText,
+    resume: rewrittenResume,
+    structuredJob,
+    gap: safeGapAnalysis,
+    client,
+    model,
+  });
 
   const skillsPrompt = skillsOptimizePrompt({
     resumeSkills: rewrittenResume.skills,
@@ -814,6 +891,7 @@ export async function runTailorPipeline(
   });
 
   const enrichedPrimary = uniqueByKey([
+    ...experienceAlignedSkills.skills,
     ...jobDescriptionSkills,
     ...jobAlignedAdditions,
     ...prioritizedPrimary,
@@ -825,6 +903,10 @@ export async function runTailorPipeline(
     secondary,
     other,
     rationale: uniqueByKey([
+      experienceAlignedSkills.skills.length
+        ? `Generated skills from overlap between the submitted job description and prior work experience: ${experienceAlignedSkills.skills.slice(0, 6).join(', ')}.`
+        : '',
+      ...experienceAlignedSkills.rationale,
       jobDescriptionSkills.length
         ? `Generated a fresh skills list from the submitted job description: ${jobDescriptionSkills.slice(0, 6).join(', ')}.`
         : '',
